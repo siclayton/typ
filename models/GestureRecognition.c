@@ -21,7 +21,7 @@ typedef struct {
 AccelerometerSample samples[20];
 
 AccelerometerSample takeSample(int sampleClass) {
-    long start = system_timer_current_time();
+    int start = system_timer_current_time();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
