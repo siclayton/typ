@@ -32,7 +32,7 @@ MicrophoneSample takeSample(int sampleClass) {
     int max = 0;
     int zeroCrossings = 0;
 
-    int lastValueWasNegative = 0;
+    int lastValueWasBelowMid = 0;
 
     while (system_timer_current_time() - start < 1000) {
         int value = uBit.io.microphone.getAnalogValue();
@@ -41,12 +41,17 @@ MicrophoneSample takeSample(int sampleClass) {
         //Update max value
         if (value > max) max = value;
 
-        if (lastValueWasNegative == 0 && value < 0) {
+        /*
+            The microphone outputs values from 0 to 1024, so to detect how much the noise oscillates
+            I am detecting how often it goes above and below 512, as this is the mid-point, but I am
+            having a threshold of 10, so the value must be either 10 or more over or under 512 to count
+        */
+        if (lastValueWasBelowMid == 0 && value < 522) {
             zeroCrossings++;
-            lastValueWasNegative = 1;
-        } else if (lastValueWasNegative == 1 && value > 0) {
+            lastValueWasBelowMid = 1;
+        } else if (lastValueWasBelowMid == 1 && value > 532) {
             zeroCrossings++;
-            lastValueWasNegative = 0;
+            lastValueWasBelowMid = 0;
         }
 
         //Calculate mean and variance for each axis
