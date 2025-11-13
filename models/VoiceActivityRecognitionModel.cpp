@@ -61,6 +61,10 @@ MicrophoneSample takeSample(int sampleClass) {
 
     MicrophoneSample sample = {sampleClass, mean, variance, max, zeroCrossings};
 
+    uBit.serial.printf("%d, %d, %d, %d, %d\r\n",
+        sampleClass, (int) (mean * 1000), (int) (variance * 1000), max, zeroCrossings
+    );
+
     return sample;
 }
 
@@ -73,28 +77,14 @@ void onButtonB(MicroBitEvent e) {
     currentClass++;
 }
 
-void onButtonAB(MicroBitEvent e) {
-    uBit.serial.printf("Samples array:\r\n");
-
-    for (int i = 0; i < currentSample; i++) {
-        uBit.serial.printf("%d, %d, %d, %d\r\n",
-        samples[i].sampleClass,
-        (int) (samples[i].mean * 1000), (int) (samples[i].variance * 1000), (int) samples[i].max);
-
-        uBit.sleep(20);
-    }
-}
-
 int main() {
     uBit.init();
-    uBit.serial.setBaud(115200);
 
     uBit.audio.enable();
     uBit.audio.activateMic();
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonB);
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_CLICK, onButtonAB);
 
     release_fiber();
 }

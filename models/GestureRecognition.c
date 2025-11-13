@@ -66,6 +66,13 @@ AccelerometerSample takeSample(int sampleClass) {
 
     AccelerometerSample sample = {sampleClass, meanX, meanY, meanZ, varX, varY, varZ, minX, minY, minZ, maxX, maxY, maxZ};
 
+    uBit.serial.printf("%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\r\n",
+        sampleClass,
+        (int) (meanX * 1000), (int) (meanY * 1000), (int) (meanZ * 1000),
+        (int) (varX * 1000), (int) (varY * 1000), (int) (varZ * 1000),
+        minX, minY, minZ, maxX, maxY, maxZ
+    );
+
     return sample;
 }
 
@@ -78,25 +85,11 @@ void onButtonB(MicroBitEvent e) {
     currentClass++;
 }
 
-void onButtonAB(MicroBitEvent e) {
-    uBit.serial.printf("Samples array:\r\n");
-
-    for (int i = 0; i < currentSample; i++) {
-        uBit.serial.printf("%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\r\n",
-        samples[i].sampleClass,
-        (int) (samples[i].meanX * 1000), (int) (samples[i].meanY * 1000), (int) (samples[i].meanZ * 1000),
-        (int) (samples[i].varX * 1000), (int) (samples[i].varY * 1000), (int) (samples[i].varZ * 1000),
-        samples[i].minX, samples[i].minY, samples[i].minZ, samples[i].maxX, samples[i].maxY, samples[i].maxZ);
-    }
-}
-
 int main() {
     uBit.init();
-    uBit.serial.setBaud(115200);
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_ALL_EVENTS, onButtonAB);
 
     release_fiber();
 }
