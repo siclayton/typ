@@ -25,10 +25,10 @@ typedef struct {
     float maxX, maxY, maxZ;
 } AccelerometerSample;
 
-AccelerometerSample samples[NUM_SAMPLES];
+AccelerometerSample samples[NUM_SAMPLES]; //The training data for the model
 
 AccelerometerSample takeSample(int sampleClass) {
-    int start = system_timer_current_time();
+    uint64_t start = system_timer_current_time();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
@@ -69,12 +69,14 @@ AccelerometerSample takeSample(int sampleClass) {
         uBit.sleep(2);
     }
 
+    //Calculate variance for the axes
     float varX = m2X / (count - 1);
     float varY = m2Y / (count - 1);
     float varZ = m2Z / (count - 1);
 
     AccelerometerSample sample = {sampleClass, meanX, meanY, meanZ, varX, varY, varZ, minX, minY, minZ, maxX, maxY, maxZ};
 
+    //Print the sample for debugging
     uBit.serial.printf("%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\r\n",
         sampleClass,
         (int) (meanX * 1000), (int) (meanY * 1000), (int) (meanZ * 1000),
@@ -85,6 +87,7 @@ AccelerometerSample takeSample(int sampleClass) {
     return sample;
 }
 
+//The KNN model
 class KNN {
     public:
         int num_features;
@@ -111,47 +114,48 @@ KNN::KNN(int num_features, int num_classes, int k, int lenxTrain, AccelerometerS
     this->k = k;
     this->lenxTrain = lenxTrain;
     this->xTrain = xTrain;
+    //Create two arrays to hold the nearest samples and nearest distances (used for predictions)
     this->kNearest = new AccelerometerSample[k];
     this->nearestDistances = new float[k];
 
+    //Initialise the nearestDistances array to very large values
+    //All the values calculated will be smaller than these so they will be place into the array
     for (int i = 0; i < k; i++) {
         nearestDistances[i] = 1e30f;
     }
 }
 
+//Predict the class of a given sample
 int KNN::predict(AccelerometerSample sample) {
-    calcKNearestNeighbours(sample);
-    int prediction = majorityClass();
+    calcKNearestNeighbours(sample); //Update the kNearest and nearestDistances arrays
+    int prediction = majorityClass(); //Use the modal class of the kNearest samples to predict the class of the sample
 
     return prediction;
 }
 
+//Update the kNearest and nearestDistances arrays
 void KNN::calcKNearestNeighbours(AccelerometerSample s) {
     for (int i = 0; i < this->lenxTrain; i++) {
+        //Calculate the distance between the sample s and this element in the xTrain array
         float dist = squared_euclidean_distance(s, i);
 
+        //If the kNearest array isn't full or the distance to this element is less than the lowest distance in the nearestDistances array,
+        //Add the sample to the kNearest samples and the distance to the nearestDistances array
         if (i < k) {
             nearestDistances[i] = dist;
             kNearest[i] = xTrain[i];
-            uBit.serial.printf("Inserted dist %d at index %d\r\n", (int) (dist * 1000), i);
         } else {
+            //Sort the arrays, so the lowest distance is at index k-1
             sortKNearestNeighbours();
             if (dist < nearestDistances[k-1]) {
                 nearestDistances[k-1] = dist;
                 kNearest[k-1] = xTrain[i];
-                uBit.serial.printf("Inserted dist %d at index %d\r\n", (int) (dist * 1000), k-1);
             }
         }
-        uBit.sleep(20);
-    }
-
-    for (int i = 0; i < k; i++) {
-        uBit.serial.printf("%d\r\n", i);
-        uBit.serial.printf("%d, ",(int) (nearestDistances[i] * 1000));
-        uBit.serial.printf("%d\r\n", kNearest[i].sampleClass);
     }
 }
 
+//Calculate the Squared Euclidean distance between the given sample and the sample at the given index in the xTrain array
 float KNN::squared_euclidean_distance(AccelerometerSample sample1, int index) {
     AccelerometerSample sample2 = xTrain[index];
 
@@ -199,6 +203,7 @@ float KNN::squared_euclidean_distance(AccelerometerSample sample1, int index) {
     return dist;
 }
 
+//Sort the kNearest and nearestDistances arrays, using bubble sort
 void KNN::sortKNearestNeighbours(){
     for (int i = 0; i < k - 1; i++) {
         for (int j = 0; j < k - i - 1; j++) {
@@ -215,6 +220,7 @@ void KNN::sortKNearestNeighbours(){
     }
 }
 
+//Determine the modal class of the kNearest array
 int KNN::majorityClass() {
     int majorityClass = 0, maxCount = 0;
 
