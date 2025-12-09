@@ -25,89 +25,6 @@ typedef struct {
     float maxX, maxY, maxZ;
 } AccelerometerSample;
 
-AccelerometerSample samples[NUM_SAMPLES]; //The training data for the model
-
-AccelerometerSample takeSample(int sampleClass) {
-    uint64_t start = system_timer_current_time();
-
-    //The mean and variance of the samples is calculated using Welford's algorithm
-    //This allows for calculations are the stream of inputs is coming in
-    float count = 0;
-    float meanX = 0, meanY = 0, meanZ = 0;
-    float m2X = 0, m2Y = 0, m2Z = 0; //Running sum of squared differences from the mean
-
-    float minX = 2500, minY = 2500, minZ = 2500; //Set all the min values to something higher than a real sample
-    float maxX = -2500, maxY = -2500, maxZ = -2500; //Set all the max values to something lower than a real sample
-
-    while (system_timer_current_time() - start < 1000) {
-        Sample3D sample = uBit.accelerometer.getSample();
-        count++;
-
-        float x = (float) sample.x, y = (float) sample.y, z = (float) sample.z;
-
-        //Update min and max values seen for each axis
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (z < minZ) minZ = z;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-        if (z > maxZ) maxZ = z;
-
-        //Calculate mean and variance for each axis
-        float diffX = x - meanX;
-        float diffY = y - meanY;
-        float diffZ = z - meanZ;
-
-        meanX += diffX / count;
-        meanY += diffY / count;
-        meanZ += diffZ / count;
-
-        m2X += diffX * (x- meanX);
-        m2Y += diffY * (y - meanY);
-        m2Z += diffZ * (z - meanZ);
-
-        uBit.sleep(2);
-    }
-
-    //Calculate variance for the axes
-    float varX = m2X / (count - 1);
-    float varY = m2Y / (count - 1);
-    float varZ = m2Z / (count - 1);
-
-    AccelerometerSample sample = {sampleClass, meanX, meanY, meanZ, varX, varY, varZ, minX, minY, minZ, maxX, maxY, maxZ};
-
-    //Print the sample for debugging
-    uBit.serial.printf("%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\r\n",
-        sampleClass,
-        (int) (meanX * 1000), (int) (meanY * 1000), (int) (meanZ * 1000),
-        (int) (varX * 1000), (int) (varY * 1000), (int) (varZ * 1000),
-        (int) minX, (int) minY, (int) minZ, (int) maxX, (int) maxY, (int) maxZ
-    );
-
-    return sample;
-}
-
-//The KNN model
-class KNN {
-    public:
-        int num_features;
-        int num_classes;
-        int k;
-        int lenxTrain;
-        AccelerometerSample* xTrain;
-        KNN() {}
-        KNN(int, int, int, int, AccelerometerSample[]);
-        int predict(AccelerometerSample);
-
-    private:
-        AccelerometerSample* kNearest;
-        float *nearestDistances;
-        void calcKNearestNeighbours(AccelerometerSample);
-        float squared_euclidean_distance(AccelerometerSample, int);
-        void sortKNearestNeighbours();
-        int majorityClass();
-};
-
 KNN::KNN(int num_features, int num_classes, int k, int lenxTrain, AccelerometerSample xTrain[]) {
     this->num_features = num_features;
     this->num_classes = num_classes;
@@ -241,7 +158,89 @@ int KNN::majorityClass() {
     return majorityClass;
 }
 
-KNN model;
+AccelerometerSample samples[NUM_SAMPLES]; //The training data for the model
+KNN model; //The KNN model instance
+
+AccelerometerSample takeSample(int sampleClass) {
+    uint64_t start = system_timer_current_time();
+
+    //The mean and variance of the samples is calculated using Welford's algorithm
+    //This allows for calculations are the stream of inputs is coming in
+    float count = 0;
+    float meanX = 0, meanY = 0, meanZ = 0;
+    float m2X = 0, m2Y = 0, m2Z = 0; //Running sum of squared differences from the mean
+
+    float minX = 2500, minY = 2500, minZ = 2500; //Set all the min values to something higher than a real sample
+    float maxX = -2500, maxY = -2500, maxZ = -2500; //Set all the max values to something lower than a real sample
+
+    while (system_timer_current_time() - start < 1000) {
+        Sample3D sample = uBit.accelerometer.getSample();
+        count++;
+
+        float x = (float) sample.x, y = (float) sample.y, z = (float) sample.z;
+
+        //Update min and max values seen for each axis
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+
+        //Calculate mean and variance for each axis
+        float diffX = x - meanX;
+        float diffY = y - meanY;
+        float diffZ = z - meanZ;
+
+        meanX += diffX / count;
+        meanY += diffY / count;
+        meanZ += diffZ / count;
+
+        m2X += diffX * (x- meanX);
+        m2Y += diffY * (y - meanY);
+        m2Z += diffZ * (z - meanZ);
+
+        uBit.sleep(2);
+    }
+
+    //Calculate variance for the axes
+    float varX = m2X / (count - 1);
+    float varY = m2Y / (count - 1);
+    float varZ = m2Z / (count - 1);
+
+    AccelerometerSample sample = {sampleClass, meanX, meanY, meanZ, varX, varY, varZ, minX, minY, minZ, maxX, maxY, maxZ};
+
+    //Print the sample for debugging
+    uBit.serial.printf("%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\r\n",
+        sampleClass,
+        (int) (meanX * 1000), (int) (meanY * 1000), (int) (meanZ * 1000),
+        (int) (varX * 1000), (int) (varY * 1000), (int) (varZ * 1000),
+        (int) minX, (int) minY, (int) minZ, (int) maxX, (int) maxY, (int) maxZ
+    );
+
+    return sample;
+}
+
+//The KNN model
+class KNN {
+    public:
+        int num_features;
+        int num_classes;
+        int k;
+        int lenxTrain;
+        AccelerometerSample* xTrain;
+        KNN() {}
+        KNN(int, int, int, int, AccelerometerSample[]);
+        int predict(AccelerometerSample);
+
+    private:
+        AccelerometerSample* kNearest;
+        float *nearestDistances;
+        void calcKNearestNeighbours(AccelerometerSample);
+        float squared_euclidean_distance(AccelerometerSample, int);
+        void sortKNearestNeighbours();
+        int majorityClass();
+};
 
 void onButtonA(MicroBitEvent e) {
     AccelerometerSample sample = takeSample(currentClass);
