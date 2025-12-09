@@ -25,6 +25,27 @@ typedef struct {
     float maxX, maxY, maxZ;
 } AccelerometerSample;
 
+//The KNN model
+class KNN {
+    public:
+        int num_features;
+        int num_classes;
+        int k;
+        int lenxTrain;
+        AccelerometerSample* xTrain;
+        KNN() {}
+        KNN(int, int, int, int, AccelerometerSample[]);
+        int predict(AccelerometerSample);
+
+    private:
+        AccelerometerSample* kNearest;
+        float *nearestDistances;
+        void calcKNearestNeighbours(AccelerometerSample);
+        float squared_euclidean_distance(AccelerometerSample, int);
+        void sortKNearestNeighbours();
+        int majorityClass();
+};
+
 KNN::KNN(int num_features, int num_classes, int k, int lenxTrain, AccelerometerSample xTrain[]) {
     this->num_features = num_features;
     this->num_classes = num_classes;
@@ -220,27 +241,6 @@ AccelerometerSample takeSample(int sampleClass) {
 
     return sample;
 }
-
-//The KNN model
-class KNN {
-    public:
-        int num_features;
-        int num_classes;
-        int k;
-        int lenxTrain;
-        AccelerometerSample* xTrain;
-        KNN() {}
-        KNN(int, int, int, int, AccelerometerSample[]);
-        int predict(AccelerometerSample);
-
-    private:
-        AccelerometerSample* kNearest;
-        float *nearestDistances;
-        void calcKNearestNeighbours(AccelerometerSample);
-        float squared_euclidean_distance(AccelerometerSample, int);
-        void sortKNearestNeighbours();
-        int majorityClass();
-};
 
 void onButtonA(MicroBitEvent e) {
     AccelerometerSample sample = takeSample(currentClass);
