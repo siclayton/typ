@@ -1,9 +1,14 @@
 #include <math.h>
 #include "MicroBit.h"
 
+#define NUM_SAMPLES 25
+#define TRUE 1
+#define FALSE 0
+
 MicroBit uBit;
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
+int training = TRUE;
 
 typedef struct {
     int sampleClass;
@@ -16,14 +21,15 @@ typedef struct {
     int zeroCrossings;
 } MicrophoneSample;
 
+MicrophoneSample samples[NUM_SAMPLES];
+
 class LogisticRegressionModel {
     public:
         ~LogisticRegressionModel() {delete[] weights;} //A destructor that ensures the memory used for the weights isn't leaked
         LogisticRegressionModel() = default;
-        LogisticRegressionModel(int, int, int, MicrophoneSample[]);
-        LogisticRegressionModel(int, int, int, int, float, float, MicrophoneSample[]);
-        float predict(MicrophoneSample);
-
+        LogisticRegressionModel(int numFeatures, int lenXTrain, MicrophoneSample xTrain[]);
+        LogisticRegressionModel(int numFeatures, int lenXTrain, int maxIter, float lr, float threshold, MicrophoneSample[]);
+        int predictClass(MicrophoneSample s);
     private:
         int numFeatures{};
         int lenxTrain{};
@@ -37,6 +43,7 @@ class LogisticRegressionModel {
         float bias{};
 
         void trainModel();
+        float predict(MicrophoneSample);
         double sigmoid(double);
         float dotProduct(MicrophoneSample);
         float crossEntropyLoss(float[]);
@@ -46,14 +53,15 @@ class LogisticRegressionModel {
 
 // Constructor that uses default parameters for the maximum number of iterations, the learning rate and the loss increase threshold
 LogisticRegressionModel::LogisticRegressionModel(
-    int numFeatures, int numClasses, int lenxTrain, MicrophoneSample xTrain[]
-    ) : LogisticRegressionModel(numFeatures, numClasses, lenxTrain, 1000, 0.01, 0.0001, xTrain) {}
+    int numFeatures, int lenxTrain, MicrophoneSample xTrain[]
+    ) : LogisticRegressionModel(numFeatures, lenxTrain, 1000, 0.01, 0.0001, xTrain) {}
 
-LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int numClasses, int lenxTrain, int maxIter, float lr, float threshold, MicrophoneSample xTrain[]) {
+LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenxTrain, int maxIter, float lr, float threshold, MicrophoneSample xTrain[]) {
     this->numFeatures = numFeatures;
     this->lenxTrain = lenxTrain;
     this->maxIter = maxIter;
     this->lr = lr;
+    this->threshold = threshold;
     this->xTrain = xTrain;
 
     //Initialise both the weights and bias to 0
@@ -162,7 +170,12 @@ float *LogisticRegressionModel::calcWeightsUpdates(float* preds) {
     return updateAmounts;
 }
 
-MicrophoneSample samples[20];
+int LogisticRegressionModel::predictClass(MicrophoneSample s) {
+    float sigmoidOutput = predict(s);
+
+    return sigmoidOutput > 0.5 ? 1 : 0;
+}
+
 LogisticRegressionModel model; //The logistic regression model instance
 
 MicrophoneSample takeSample(int sampleClass) {
@@ -220,11 +233,24 @@ MicrophoneSample takeSample(int sampleClass) {
 
 void onButtonA(MicroBitEvent e) {
     MicrophoneSample sample = takeSample(currentClass);
-    samples[currentSample++] = sample;
+
+    if (training == TRUE) {
+        samples[currentSample++] = sample;
+    } else {
+        int prediction = model.predictClass(sample);
+        uBit.serial.printf("Prediction %d\r\n", prediction);
+        uBit.display.print(prediction);
+    }
 }
 
 void onButtonB(MicroBitEvent e) {
     currentClass++;
+}
+
+void onButtonAB(MicroBitEvent e) {
+    model = LogisticRegressionModel(4, NUM_SAMPLES, samples);
+    uBit.serial.printf("Model trained\r\n");
+    training = FALSE;
 }
 
 int main() {
