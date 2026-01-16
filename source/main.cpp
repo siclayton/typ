@@ -1,7 +1,7 @@
 #include <cmath>
 #include "MicroBit.h"
 
-#define NUM_SAMPLES 25
+#define NUM_SAMPLES 100
 #define TRUE 1
 #define FALSE 0
 
@@ -14,6 +14,7 @@ int training = TRUE;
 typedef struct {
     float variance;
     int max;
+    float zcr;
 } MicrophoneSample;
 
 //Data type representing a labelled MicrophoneSample
@@ -58,7 +59,7 @@ class LogisticRegressionModel {
 // Constructor that uses default parameters for the maximum number of iterations, the learning rate and the loss increase threshold
 LogisticRegressionModel::LogisticRegressionModel(
     int numFeatures, int lenXTrain, TrainingSample xTrain[]
-    ) : LogisticRegressionModel(numFeatures, lenXTrain, 5000, 0.001, 0.0f, xTrain) {}
+    ) : LogisticRegressionModel(numFeatures, lenXTrain, 5000, 0.01, 1e-5, xTrain) {}
 
 LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenXTrain, int maxIter, float lr, float threshold, TrainingSample xTrain[]) {
     this->numFeatures = numFeatures;
@@ -112,6 +113,12 @@ void LogisticRegressionModel::trainModel() {
     }
 
     delete[] predictions;
+
+    uBit.serial.printf("Bias=%d\r\n Weights =", (int) (bias *1000));
+    for (int i = 0; i < numFeatures; i++){
+        uBit.serial.printf("%d, ", (int) (weights[i] * 1000));
+    }
+    uBit.serial.printf("\r\n");
 }
 
 double LogisticRegressionModel::sigmoid(double x) {
@@ -123,12 +130,14 @@ float LogisticRegressionModel::dotProduct(MicrophoneSample s) {
     //Very naive scaling based on seen values when training
     float variance = (s.variance - 50.0f) / 50.0f;
     float max = (static_cast<float>(s.max) - 425.0f) / 50.0f;
+    float zcr = (s.zcr - 0.16f) / 0.04f;
 
     float logit = 0;
 
     //Compute the dot product of the sample features and the weights
     logit += variance * weights[0];
     logit += max * weights[1];
+    logit += zcr * weights[2];
 
     return logit;
 }
@@ -177,10 +186,12 @@ float *LogisticRegressionModel::calcWeightsUpdates(float* preds) {
         //Apply feature scaling
         float variance = (xTrain[i].features.variance - 50.0f) / 50.0f;
         float max = (static_cast<float>(xTrain[i].features.max) - 425.0f) / 50.0f;
+        float zcr = (xTrain[i].features.zcr - 0.16f) / 0.04f;
 
         float error = preds[i] - static_cast<float>(xTrain[i].sampleClass);
         updateAmounts[0] += error * variance;
         updateAmounts[1] += error * max;
+        updateAmounts[2] += error * zcr;
     }
 
     for (int i = 0; i < numFeatures; i++) {
@@ -197,7 +208,7 @@ int LogisticRegressionModel::predictClass(MicrophoneSample s) {
 
     uBit.serial.printf("Sigmoid output = %d\r\n", static_cast<int>(sigmoidOutput * 100));
 
-    return sigmoidOutput > 0.40 ? 1 : 0;
+    return sigmoidOutput > 0.50 ? 1 : 0;
 }
 
 //Initialise the model variable to nothing (until the model is trained)
@@ -213,13 +224,19 @@ MicrophoneSample takeSample(int sampleClass) {
 
     uint64_t start = system_timer_current_time();
 
+    int prev = uBit.io.microphone.getAnalogValue();
+
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
     float count = 0;
-    float mean = 0;
+    float mean = static_cast<float>(prev);
     float m2 = 0; //Running sum of squared differences from the mean
 
     int max = 0;
+    float zeroCrossings = 0;
+
+    const int threshold = 2;
+
 
     while (system_timer_current_time() - start < 1000) {
         int value = uBit.io.microphone.getAnalogValue();
@@ -228,20 +245,31 @@ MicrophoneSample takeSample(int sampleClass) {
         //Update max value
         if (value > max) max = value;
 
+        float d1 = prev - mean;
+        float d2 = value - mean;
+
+        if ((d1 > threshold && d2 < -threshold) || (d1 < -threshold && d2 > threshold)) {
+            zeroCrossings++;
+        }
+        // //Check if there was a zerocrossing
+        // if ((prev - mean) * (value - mean) > 0) zeroCrossings++;
+
         //Update values needed to calculate variance
         float diff = static_cast<float>(value) - mean;
         mean += diff / count;
         m2 += diff * (static_cast<float>(value) - mean);
 
+        prev = value;
         uBit.sleep(2);
     }
 
     float variance = m2 / (count - 1);
+    float zcr = zeroCrossings / count; //Divide by the count to get the zero crossing rate
 
-    MicrophoneSample sample = {variance, max};
+    MicrophoneSample sample = {variance, max, zcr};
 
-    uBit.serial.printf("%d, %d, %d\r\n",
-        sampleClass, static_cast<int>(variance * 1000), max
+    uBit.serial.printf("Sample %d: %d, %d, %d, %d\r\n",
+        currentSample, sampleClass, static_cast<int>(variance * 1000), max, static_cast<int>(zcr * 1000)
     );
 
     return sample;
@@ -269,7 +297,7 @@ void onButtonB(MicroBitEvent e) {
 void onButtonAB(MicroBitEvent e) {
     //Update model variable to a trained LogisticRegressionModel instance
     delete model;
-    model = new LogisticRegressionModel(2, currentSample, samples);
+    model = new LogisticRegressionModel(3, currentSample, samples);
 
     uBit.serial.printf("Model trained\r\n");
     training = FALSE;
