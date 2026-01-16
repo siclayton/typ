@@ -245,14 +245,13 @@ MicrophoneSample takeSample(int sampleClass) {
         //Update max value
         if (value > max) max = value;
 
-        float d1 = prev - mean;
-        float d2 = value - mean;
-
-        if ((d1 > threshold && d2 < -threshold) || (d1 < -threshold && d2 > threshold)) {
+        //Check if there was a "zeroCrossing"
+        //As the range of values from the microphone are 0-1024, zerocrossings are calculated over the mean
+        float diff1 = prev - mean;
+        float diff2 = value - mean;
+        if ((diff1 > threshold && diff2 < -threshold) || (diff1 < -threshold && diff2 > threshold)) {
             zeroCrossings++;
         }
-        // //Check if there was a zerocrossing
-        // if ((prev - mean) * (value - mean) > 0) zeroCrossings++;
 
         //Update values needed to calculate variance
         float diff = static_cast<float>(value) - mean;
