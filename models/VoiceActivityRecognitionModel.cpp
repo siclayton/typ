@@ -40,11 +40,9 @@ class LogisticRegressionModel {
         float lr{};
         float threshold{}; //The minimum amount the loss must decrease by to continue training
         TrainingSample* xTrain{};
-
         //Values to train using gradient descent
         float* weights;
         float bias;
-
         float epsilon; //Used to clamp predictions to ensure the log of 0 or 1 is never computed
 
         void trainModel();
