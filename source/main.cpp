@@ -108,6 +108,12 @@ float NaiveBayesModel::getConditionalProbability(int c, int feature, int bin) {
                                     feature * NUM_BINS + bin ];
 }
 
+int NaiveBayesModel::getBin(int feature, float value) {
+    float binSize = (maxFeatureValues[feature] - minFeatureValues[feature]) / NUM_BINS;
+
+    return (int) (value - minFeatureValues[feature]) / binSize;
+}
+
 EnvironmentSample samples[NUM_SAMPLES];
 
 EnvironmentSample takeSample(int sampleClass) {
