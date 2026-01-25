@@ -1,317 +1,174 @@
-#include <cmath>
 #include "MicroBit.h"
 
-#define NUM_SAMPLES 100
-#define TRUE 1
-#define FALSE 0
+#include <vector>
+
+#define NUM_SAMPLES 20
+#define NUM_BINS 4
 
 MicroBit uBit;
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
-int training = TRUE;
 
-//Data type containing the features of a microphone sample
-typedef struct {
-    float variance;
-    int max;
-    float zcr;
-} MicrophoneSample;
-
-//Data type representing a labelled MicrophoneSample
-//Used for training the model
 typedef struct {
     int sampleClass;
 
-    MicrophoneSample features;
-}TrainingSample;
+    float meanTemp;
+    float meanLightLevel;
 
-TrainingSample samples[NUM_SAMPLES];
+    float tempVariance;
+    float lightLevelVariance;
 
-class LogisticRegressionModel {
+    float getFeature(int index) {
+        switch (index) {
+            case 0: return meanTemp;
+            case 1: return meanLightLevel;
+            case 2: return tempVariance;
+            case 3: return lightLevelVariance;
+            default: return 0;
+        }
+    }
+
+} EnvironmentSample;
+
+class NaiveBayesModel {
     public:
-        ~LogisticRegressionModel() {delete[] weights;} //A destructor that ensures the memory used for the weights isn't leaked
-        LogisticRegressionModel(int numFeatures, int lenXTrain, TrainingSample xTrain[]);
-        LogisticRegressionModel(int numFeatures, int lenXTrain, int maxIter, float lr, float threshold, TrainingSample[]);
-        int predictClass(MicrophoneSample s);
+        NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, EnvironmentSample* xTrain);
+
     private:
-        int numFeatures{};
-        int lenXTrain{};
-        int maxIter{};
-        float lr{};
-        float threshold{}; //The minimum amount the loss must decrease by to continue training
-        TrainingSample* xTrain{};
+        int numFeatures;
+        int numClasses;
+        int lenXTrain;
+        EnvironmentSample* xTrain;
+        int* classCounts;
+        float* classProbabilities;
+        float* conditionalProbabilities;
 
-        //Values to train using gradient descent
-        float* weights;
-        float bias;
-
-        float epsilon; //Used to clamp predictions to ensure the log of 0 or 1 is never computed
+        //Set mins initially to a large value and set maxes initially to 0
+        float* minFeatureValues;
+        float* maxFeatureValues;
 
         void trainModel();
-        float predict(MicrophoneSample);
-        double sigmoid(double);
-        float dotProduct(MicrophoneSample);
-        float crossEntropyLoss(float[]);
-        float calcBiasUpdate(float[]);
-        float* calcWeightsUpdates(float[]);
+        void calcClassProbabilities();
+        void calcConditionalProbabilities();
+        float getConditionalProbability(int c, int feature, int bin);
+        int getBin(int feature, float value);
 };
 
-// Constructor that uses default parameters for the maximum number of iterations, the learning rate and the loss increase threshold
-LogisticRegressionModel::LogisticRegressionModel(
-    int numFeatures, int lenXTrain, TrainingSample xTrain[]
-    ) : LogisticRegressionModel(numFeatures, lenXTrain, 5000, 0.01, 1e-5, xTrain) {}
-
-LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenXTrain, int maxIter, float lr, float threshold, TrainingSample xTrain[]) {
+NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, EnvironmentSample* xTrain) {
     this->numFeatures = numFeatures;
+    this->numClasses = numClasses;
     this->lenXTrain = lenXTrain;
-    this->maxIter = maxIter;
-    this->lr = lr;
-    this->threshold = threshold;
     this->xTrain = xTrain;
 
-    //Initialise both the weights and bias to 0
-    this->weights = new float[numFeatures];
-    for (int i = 0; i < numFeatures; i++){
-        this->weights[i] = 0;
+    this->classCounts = new int[numClasses];
+    this->classProbabilities = new float[numClasses];
+    this->conditionalProbabilities = new float[numClasses * numFeatures * NUM_BINS]();
+    this->minFeatureValues = new float[numFeatures];
+    this->maxFeatureValues = new float[numFeatures];
+
+    for (int i = 0; i < numFeatures; i++) {
+        float value = xTrain[0].getFeature(i);
+        maxFeatureValues[i] = value;
+        minFeatureValues[i] = value;
     }
-    this->bias = 0;
-    this->epsilon = 1e-7f; //Used to clamp predictions to avoid calculating log(0) or log(1)
 
     trainModel();
 }
 
-void LogisticRegressionModel::trainModel() {
-    float previousLoss = 1000; //Set to a large value (any actual loss will be smaller than this)
-    auto* predictions = new float[lenXTrain];
+void NaiveBayesModel::trainModel() {
+    for (int i = 0; i < lenXTrain; i++) {
+        //Count the number of occurrences of each class in the training data
+        classCounts[xTrain[i].sampleClass]++;
 
-    //Training loop
-    for (int i = 0; i < maxIter; i++) {
-        for (int j = 0; j < lenXTrain; j++) {
-            float pred = predict(xTrain[j].features);
-            predictions[j] = pred;
-        }
-
-        float loss = crossEntropyLoss(predictions);
-
-        //Calculate the updates needed for the weights and bias
-        float biasChange = calcBiasUpdate(predictions);
-        float* weightsChanges = calcWeightsUpdates(predictions);
-
-        //Update the weights and bias
-        bias -= lr * biasChange;
+        //Find min and max values for each feature (used to determine the bin sizes)
         for (int j = 0; j < numFeatures; j++) {
-            weights[j] -= lr * weightsChanges[j];
+            float value = xTrain[i].getFeature(j);
+
+            if (value < minFeatureValues[j]) minFeatureValues[j] = value;
+            if (value > maxFeatureValues[j]) maxFeatureValues[j] = value;
         }
-
-        delete[] weightsChanges;
-
-        //Stop iterating if the loss hasn't improved by more than the threshold value
-        if (previousLoss - loss < threshold)
-            break;
-
-        previousLoss = loss;
     }
 
-    delete[] predictions;
+    calcClassProbabilities();
+    calcConditionalProbabilities();
+}
 
-    uBit.serial.printf("Bias=%d\r\n Weights =", (int) (bias *1000));
-    for (int i = 0; i < numFeatures; i++){
-        uBit.serial.printf("%d, ", (int) (weights[i] * 1000));
+void NaiveBayesModel::calcClassProbabilities() {
+    for (int i = 0; i < numClasses; i++) {
+        classProbabilities[i] = static_cast<float>(classCounts[i]) / static_cast<float>(lenXTrain);
     }
-    uBit.serial.printf("\r\n");
 }
 
-double LogisticRegressionModel::sigmoid(double x) {
-    return 1 / (1 + exp(-x));
+void NaiveBayesModel::calcConditionalProbabilities() {
+
 }
 
-float LogisticRegressionModel::dotProduct(MicrophoneSample s) {
-    //Scale features to prevent dot product from exploding
-    //Very naive scaling based on seen values when training
-    float variance = (s.variance - 50.0f) / 50.0f;
-    float max = (static_cast<float>(s.max) - 425.0f) / 50.0f;
-    float zcr = (s.zcr - 0.16f) / 0.04f;
-
-    float logit = 0;
-
-    //Compute the dot product of the sample features and the weights
-    logit += variance * weights[0];
-    logit += max * weights[1];
-    logit += zcr * weights[2];
-
-    return logit;
+float NaiveBayesModel::getConditionalProbability(int c, int feature, int bin) {
+    return conditionalProbabilities[c * numFeatures * NUM_BINS +
+                                    feature * NUM_BINS + bin ];
 }
 
-float LogisticRegressionModel::predict(MicrophoneSample sample) {
-    float logit = dotProduct(sample) + bias;
+EnvironmentSample samples[NUM_SAMPLES];
 
-    float prediction = sigmoid(logit);
-
-    return prediction;
-}
-
-float LogisticRegressionModel::crossEntropyLoss(float* preds) {
-    double loss = 0;
-
-    for (int i = 0; i < lenXTrain; i++) {
-        float p = preds[i];
-
-        //Clamp p into the range: epsilon >= p >= 1 - epsilon
-        if (p < epsilon)
-            p = epsilon;
-        else if (p > 1 - epsilon)
-            p = 1 - epsilon;
-
-        //Compute the cross-entropy loss for this sample and add it to the total
-        loss += static_cast<float>(xTrain[i].sampleClass) * log(p) + static_cast<float>(1 - xTrain[i].sampleClass) * log(1 - p);
-    }
-
-    return -loss / static_cast<float>(lenXTrain);
-}
-
-float LogisticRegressionModel::calcBiasUpdate(float* preds) {
-    float updateAmount = 0;
-
-    for (int i = 0; i < lenXTrain; i++) {
-        updateAmount += preds[i] - static_cast<float>(xTrain[i].sampleClass);
-    }
-
-    return updateAmount / static_cast<float>(lenXTrain);
-}
-
-float *LogisticRegressionModel::calcWeightsUpdates(float* preds) {
-    auto* updateAmounts = new float[numFeatures]();
-
-    for (int i = 0; i < lenXTrain; i++) {
-        //Apply feature scaling
-        float variance = (xTrain[i].features.variance - 50.0f) / 50.0f;
-        float max = (static_cast<float>(xTrain[i].features.max) - 425.0f) / 50.0f;
-        float zcr = (xTrain[i].features.zcr - 0.16f) / 0.04f;
-
-        float error = preds[i] - static_cast<float>(xTrain[i].sampleClass);
-        updateAmounts[0] += error * variance;
-        updateAmounts[1] += error * max;
-        updateAmounts[2] += error * zcr;
-    }
-
-    for (int i = 0; i < numFeatures; i++) {
-        updateAmounts[i] /= static_cast<float>(lenXTrain);
-    }
-
-    return updateAmounts;
-}
-
-//Return a prediction of the class of the given sample
-//  1 means the model predicts speech, 0 means the model predicts no speech
-int LogisticRegressionModel::predictClass(MicrophoneSample s) {
-    float sigmoidOutput = predict(s);
-
-    uBit.serial.printf("Sigmoid output = %d\r\n", static_cast<int>(sigmoidOutput * 100));
-
-    return sigmoidOutput > 0.50 ? 1 : 0;
-}
-
-//Initialise the model variable to nothing (until the model is trained)
-//Acts as a placeholder until a trained model is created
-LogisticRegressionModel* model = nullptr;
-
-MicrophoneSample takeSample(int sampleClass) {
-    //Discard the first 1/4 of a second of measurements to ensure samples don't include noise
-    uint64_t discardStart = system_timer_current_time();
-    while (system_timer_current_time() - discardStart < 250){
-        uBit.io.microphone.getAnalogValue();
-    }
-
+EnvironmentSample takeSample(int sampleClass) {
     uint64_t start = system_timer_current_time();
-
-    int prev = uBit.io.microphone.getAnalogValue();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
-    float count = 0;
-    float mean = static_cast<float>(prev);
-    float m2 = 0; //Running sum of squared differences from the mean
+    int count = 0;
+    float meanTemp = 0;
+    float m2Temp = 0; //Running sum of squared differences from the mean
 
-    int max = 0;
-    float zeroCrossings = 0;
-
-    const int threshold = 2;
-
+    float meanLightLevel = 0;
+    float m2LightLevel = 0;
 
     while (system_timer_current_time() - start < 1000) {
-        int value = uBit.io.microphone.getAnalogValue();
+        int tempValue = uBit.thermometer.getTemperature();
+        int lightLevelValue = uBit.display.readLightLevel();
         count++;
 
-        //Update max value
-        if (value > max) max = value;
+        //Calculate mean and variance for each axis
+        float tempDiff = (float) tempValue - meanTemp;
+        meanTemp += tempDiff / count;
+        m2Temp += tempDiff * (tempValue - meanTemp);
 
-        //Check if there was a "zeroCrossing"
-        //As the range of values from the microphone are 0-1024, zerocrossings are calculated over the mean
-        float diff1 = prev - mean;
-        float diff2 = value - mean;
-        if ((diff1 > threshold && diff2 < -threshold) || (diff1 < -threshold && diff2 > threshold)) {
-            zeroCrossings++;
-        }
+        float lightLevelDiff = (float) lightLevelValue - meanLightLevel;
+        meanLightLevel += lightLevelDiff / count;
+        m2LightLevel += lightLevelDiff * (lightLevelValue - meanLightLevel);
 
-        //Update values needed to calculate variance
-        float diff = static_cast<float>(value) - mean;
-        mean += diff / count;
-        m2 += diff * (static_cast<float>(value) - mean);
-
-        prev = value;
         uBit.sleep(2);
     }
 
-    float variance = m2 / (count - 1);
-    float zcr = zeroCrossings / count; //Divide by the count to get the zero crossing rate
+    float tempVariance = m2Temp / (count - 1);
+    float lightLevelVariance = m2LightLevel / (count - 1);
 
-    MicrophoneSample sample = {variance, max, zcr};
+    EnvironmentSample sample = {sampleClass, meanTemp, meanLightLevel, tempVariance, lightLevelVariance};
 
-    uBit.serial.printf("Sample %d: %d, %d, %d, %d\r\n",
-        currentSample, sampleClass, static_cast<int>(variance * 1000), max, static_cast<int>(zcr * 1000)
+    uBit.serial.printf("%d, %d, %d, %d, %d\r\n",
+        sampleClass, (int) (meanTemp * 1000), (int) (meanLightLevel * 1000),
+        (int) (tempVariance * 1000), (int) (lightLevelVariance * 1000)
     );
 
     return sample;
 }
 
 void onButtonA(MicroBitEvent e) {
-    MicrophoneSample micSample = takeSample(currentClass);
-
-    //If in training mode, label sample and add it to list of samples used to train the model
-    //Otherwise, predict the class of the sample collected
-    if (training == TRUE) {
-        TrainingSample sample = {currentClass, micSample};
-        samples[currentSample++] = sample;
-    } else {
-        int prediction = model->predictClass(micSample);
-        uBit.serial.printf("Prediction %d\r\n", prediction);
-        uBit.display.print(prediction);
-    }
+    EnvironmentSample sample = takeSample(currentClass);
+    samples[currentSample++] = sample;
 }
 
 void onButtonB(MicroBitEvent e) {
     currentClass++;
 }
 
-void onButtonAB(MicroBitEvent e) {
-    //Update model variable to a trained LogisticRegressionModel instance
-    delete model;
-    model = new LogisticRegressionModel(3, currentSample, samples);
-
-    uBit.serial.printf("Model trained\r\n");
-    training = FALSE;
-}
-
 int main() {
     uBit.init();
+    uBit.serial.setBaud(115200);
 
-    //Turn on the microphone
-    uBit.audio.enable();
-    uBit.audio.activateMic();
+    uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE_LIGHT_SENSE);
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonB);
-    uBit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_CLICK, onButtonAB);
 
     release_fiber();
 }
