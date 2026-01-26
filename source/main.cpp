@@ -4,10 +4,13 @@
 
 #define NUM_SAMPLES 20
 #define NUM_BINS 4
+#define TRUE 1
+#define FALSE 0
 
 MicroBit uBit;
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
+int training = TRUE;
 
 typedef struct {
     int sampleClass;
@@ -33,6 +36,7 @@ typedef struct {
 class NaiveBayesModel {
     public:
         NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, EnvironmentSample* xTrain);
+        int predict(EnvironmentSample sample);
 
     private:
         int numFeatures;
@@ -115,6 +119,10 @@ void NaiveBayesModel::calcConditionalProbabilities() {
     //Convert to probabilities
     for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i ++) {
         conditionalProbabilities[i] /= static_cast<float>(lenXTrain);
+
+        //If the combination of class, feature and bin didn't appear in the dataset,
+        //set the probability to a very low number (so the combination isn't completely ignored during predictions)
+        if (conditionalProbabilities[i] == 0) conditionalProbabilities[i] = 1e-7;
     }
 }
 
@@ -128,14 +136,42 @@ int NaiveBayesModel::getBin(int feature, float value) {
     return static_cast<int>((value - minFeatureValues[feature]) / binSize);
 }
 
+int NaiveBayesModel::predict(EnvironmentSample sample) {
+    int prediction = 0;
+    float highestProbability = 0;
+
+    for (int i = 0; i < numClasses; i++) {
+        float classProbability = 1;
+
+        for (int j = 0; j < numFeatures; j++) {
+            float value = sample.getFeature(j);
+            int bin = getBin(j, value);
+            int cProbIndex = getCProbIndex(i, j, bin);
+
+            classProbability *= conditionalProbabilities[cProbIndex];
+        }
+
+        if (classProbability > highestProbability) {
+            highestProbability = classProbability;
+            prediction = i;
+        }
+    }
+
+    return prediction;
+}
+
 EnvironmentSample samples[NUM_SAMPLES];
+//Initialise the model variable to nothing (until the model is trained)
+//Acts as a placeholder until a trained model is created
+NaiveBayesModel* model = nullptr;
+
 
 EnvironmentSample takeSample(int sampleClass) {
     uint64_t start = system_timer_current_time();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
-    int count = 0;
+    float count = 0;
     float meanTemp = 0;
     float m2Temp = 0; //Running sum of squared differences from the mean
 
@@ -148,11 +184,11 @@ EnvironmentSample takeSample(int sampleClass) {
         count++;
 
         //Calculate mean and variance for each axis
-        float tempDiff = (float) tempValue - meanTemp;
+        float tempDiff = static_cast<float>(tempValue) - meanTemp;
         meanTemp += tempDiff / count;
         m2Temp += tempDiff * (tempValue - meanTemp);
 
-        float lightLevelDiff = (float) lightLevelValue - meanLightLevel;
+        float lightLevelDiff = static_cast<float>(lightLevelValue) - meanLightLevel;
         meanLightLevel += lightLevelDiff / count;
         m2LightLevel += lightLevelDiff * (lightLevelValue - meanLightLevel);
 
@@ -165,8 +201,8 @@ EnvironmentSample takeSample(int sampleClass) {
     EnvironmentSample sample = {sampleClass, meanTemp, meanLightLevel, tempVariance, lightLevelVariance};
 
     uBit.serial.printf("%d, %d, %d, %d, %d\r\n",
-        sampleClass, (int) (meanTemp * 1000), (int) (meanLightLevel * 1000),
-        (int) (tempVariance * 1000), (int) (lightLevelVariance * 1000)
+        sampleClass, static_cast<int>(meanTemp * 1000), static_cast<int>(meanLightLevel * 1000),
+        static_cast<int>(tempVariance * 1000), static_cast<int>(lightLevelVariance * 1000)
     );
 
     return sample;
@@ -174,11 +210,28 @@ EnvironmentSample takeSample(int sampleClass) {
 
 void onButtonA(MicroBitEvent e) {
     EnvironmentSample sample = takeSample(currentClass);
-    samples[currentSample++] = sample;
+
+    //If in training mode, label sample and add it to list of samples used to train the model
+    //Otherwise, predict the class of the sample collected
+    if (training == TRUE) {
+        samples[currentSample++] = sample;
+    } else {
+        int prediction = model->predict(sample);
+        uBit.serial.printf("Prediction %d\r\n", prediction);
+        uBit.display.print(prediction);
+    }
 }
 
 void onButtonB(MicroBitEvent e) {
     currentClass++;
+}
+
+void onButtonAB(MicroBitEvent e) {
+    delete model;
+    model = new NaiveBayesModel(4, currentClass, NUM_SAMPLES, samples);
+
+    uBit.serial.printf("Model trained\r\n");
+    training = FALSE;
 }
 
 int main() {
@@ -189,6 +242,7 @@ int main() {
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonB);
+    uBit.messageBus.listen(MICROBIT_ID_BUTTON_AB, MICROBIT_BUTTON_EVT_CLICK, onButtonAB);
 
     release_fiber();
 }
