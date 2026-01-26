@@ -50,7 +50,7 @@ class NaiveBayesModel {
         void trainModel();
         void calcClassProbabilities();
         void calcConditionalProbabilities();
-        float getConditionalProbability(int c, int feature, int bin);
+        int getCProbIndex(int c, int feature, int bin);
         int getBin(int feature, float value);
 };
 
@@ -100,18 +100,32 @@ void NaiveBayesModel::calcClassProbabilities() {
 }
 
 void NaiveBayesModel::calcConditionalProbabilities() {
+    //Count how many occurrences of each feature "value" there are
+    //The values have been split into 4 bins
+    for (int i = 1; i < lenXTrain; i++) {
+        for (int j = 0; j < numFeatures; j++) {
+            EnvironmentSample sample = xTrain[i];
+            float value = sample.getFeature(j);
 
+            int bin = getBin(j, value);
+            conditionalProbabilities[getCProbIndex(sample.sampleClass, j, bin)]++;
+        }
+    }
+
+    //Convert to probabilities
+    for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i ++) {
+        conditionalProbabilities[i] /= static_cast<float>(lenXTrain);
+    }
 }
 
-float NaiveBayesModel::getConditionalProbability(int c, int feature, int bin) {
-    return conditionalProbabilities[c * numFeatures * NUM_BINS +
-                                    feature * NUM_BINS + bin ];
+int NaiveBayesModel::getCProbIndex(int c, int feature, int bin) {
+    return c * numFeatures * NUM_BINS + feature * NUM_BINS + bin;
 }
 
 int NaiveBayesModel::getBin(int feature, float value) {
     float binSize = (maxFeatureValues[feature] - minFeatureValues[feature]) / NUM_BINS;
 
-    return (int) (value - minFeatureValues[feature]) / binSize;
+    return static_cast<int>((value - minFeatureValues[feature]) / binSize);
 }
 
 EnvironmentSample samples[NUM_SAMPLES];
