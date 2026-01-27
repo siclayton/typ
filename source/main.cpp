@@ -64,7 +64,7 @@ NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain,
     this->lenXTrain = lenXTrain;
     this->xTrain = xTrain;
 
-    this->classCounts = new int[numClasses];
+    this->classCounts = new int[numClasses]();
     this->classProbabilities = new float[numClasses];
     this->conditionalProbabilities = new float[numClasses * numFeatures * NUM_BINS]();
     this->minFeatureValues = new float[numFeatures];
@@ -95,6 +95,11 @@ void NaiveBayesModel::trainModel() {
 
     calcClassProbabilities();
     calcConditionalProbabilities();
+
+    for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i++) {
+        uBit.serial.printf("%d, ", (int)(conditionalProbabilities[i] * 1000));
+        if ((i + 1) % 4 == 0) uBit.serial.printf("\r\n");
+    }
 }
 
 void NaiveBayesModel::calcClassProbabilities() {
@@ -106,7 +111,7 @@ void NaiveBayesModel::calcClassProbabilities() {
 void NaiveBayesModel::calcConditionalProbabilities() {
     //Count how many occurrences of each feature "value" there are
     //The values have been split into 4 bins
-    for (int i = 1; i < lenXTrain; i++) {
+    for (int i = 0; i < lenXTrain; i++) {
         for (int j = 0; j < numFeatures; j++) {
             EnvironmentSample sample = xTrain[i];
             float value = sample.getFeature(j);
@@ -117,12 +122,18 @@ void NaiveBayesModel::calcConditionalProbabilities() {
     }
 
     //Convert to probabilities
-    for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i ++) {
-        conditionalProbabilities[i] /= static_cast<float>(lenXTrain);
+    for (int i = 0; i < numClasses; i ++) {
+        for (int j = 0; j < numFeatures; j++) {
+            for (int k = 0; k < NUM_BINS; k++)
+            {
+                int index = getCProbIndex(i,j,k);
+                conditionalProbabilities[index] /= static_cast<float>(classCounts[i]);
 
-        //If the combination of class, feature and bin didn't appear in the dataset,
-        //set the probability to a very low number (so the combination isn't completely ignored during predictions)
-        if (conditionalProbabilities[i] == 0) conditionalProbabilities[i] = 1e-7;
+                //If the combination of class, feature and bin didn't appear in the dataset,
+                //set the probability to a very low number (so the combination isn't completely ignored during predictions)
+                if (conditionalProbabilities[index] == 0) conditionalProbabilities[index] = 1e-4;
+            }
+        }
     }
 }
 
@@ -131,24 +142,34 @@ int NaiveBayesModel::getCProbIndex(int c, int feature, int bin) {
 }
 
 int NaiveBayesModel::getBin(int feature, float value) {
-    float binSize = (maxFeatureValues[feature] - minFeatureValues[feature]) / NUM_BINS;
+    float range = maxFeatureValues[feature] - minFeatureValues[feature];
+    if (range < 1e-6) return 0;
 
-    return static_cast<int>((value - minFeatureValues[feature]) / binSize);
+    float binSize = range / NUM_BINS;
+
+    int bin = static_cast<int>((value - minFeatureValues[feature]) / binSize);
+
+    //Ensure bin isn't out of range
+    if (bin >= NUM_BINS) bin = NUM_BINS - 1;
+    if (bin < 0) bin = 0;
+
+    return bin;
 }
 
 int NaiveBayesModel::predict(EnvironmentSample sample) {
     int prediction = 0;
-    float highestProbability = 0;
+    float highestProbability = -1e30f; //Set highestProbability to a low negative number
 
     for (int i = 0; i < numClasses; i++) {
-        float classProbability = 1;
+        //Use log probabilities to prevent underflow
+        float classProbability = log(classProbabilities[i]);
 
         for (int j = 0; j < numFeatures; j++) {
             float value = sample.getFeature(j);
             int bin = getBin(j, value);
             int cProbIndex = getCProbIndex(i, j, bin);
 
-            classProbability *= conditionalProbabilities[cProbIndex];
+            classProbability += log(conditionalProbabilities[cProbIndex]);
         }
 
         if (classProbability > highestProbability) {
@@ -167,6 +188,8 @@ NaiveBayesModel* model = nullptr;
 
 
 EnvironmentSample takeSample(int sampleClass) {
+    uBit.display.clear();
+    uBit.sleep(50);
     uint64_t start = system_timer_current_time();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
@@ -192,7 +215,7 @@ EnvironmentSample takeSample(int sampleClass) {
         meanLightLevel += lightLevelDiff / count;
         m2LightLevel += lightLevelDiff * (lightLevelValue - meanLightLevel);
 
-        uBit.sleep(2);
+        uBit.sleep(20);
     }
 
     float tempVariance = m2Temp / (count - 1);
@@ -228,7 +251,7 @@ void onButtonB(MicroBitEvent e) {
 
 void onButtonAB(MicroBitEvent e) {
     delete model;
-    model = new NaiveBayesModel(4, currentClass, NUM_SAMPLES, samples);
+    model = new NaiveBayesModel(4, currentClass + 1, currentSample, samples);
 
     uBit.serial.printf("Model trained\r\n");
     training = FALSE;
