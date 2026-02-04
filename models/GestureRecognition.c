@@ -1,7 +1,7 @@
 #include "MicroBit.h"
 #include "samples/Tests.h"
 
-#define NUM_SAMPLES 25
+#define NUM_SAMPLES 100
 #define K_VALUE 5
 #define TRUE 1
 #define FALSE 0
@@ -12,60 +12,76 @@ int currentSample = 0; //The position in the samples array to add the next sampl
 
 int training = TRUE;
 
+typedef enum {
+    //Mean movement in x,y and z axis across the time the sample was recorded for
+    MEAN_ACC_X, MEAN_ACC_Y, MEAN_ACC_Z,
+    //Variance of movement in x,y and z, across the time the sample was recorded for
+    VAR_ACC_X, VAR_ACC_Y, VAR_ACC_Z,
+    MIN_ACC_X, MIN_ACC_Y, MIN_ACC_Z,
+    MAX_ACC_X, MAX_ACC_Y, MAX_ACC_Z,
+
+    MEAN_MAG_X, MEAN_MAG_Y, MEAN_MAG_Z,
+    VAR_MAG_X, VAR_MAG_Y, VAR_MAG_Z,
+    MIN_MAG_X, MIN_MAG_Y, MIN_MAG_Z,
+    MAX_MAG_X, MAX_MAG_Y, MAX_MAG_Z,
+
+    FEATURE_COUNT
+} FeatureIndexes;
+
+typedef struct {
+    float features[FEATURE_COUNT];
+
+    float getFeature(FeatureIndexes i) {
+        return features[i];
+    }
+} GestureSample;
+
 typedef struct {
     int sampleClass;
-
-    //Mean movement in x,y and z axis across the time the sample was recorded for
-    float meanX, meanY, meanZ;
-
-    //Variance of movement in x,y and z, across the time the sample was recorded for
-    float varX, varY, varZ;
-
-    float minX, minY, minZ;
-    float maxX, maxY, maxZ;
-} AccelerometerSample;
+    GestureSample sample;
+} TrainingSample;
 
 //The KNN model
 class KNN {
     public:
         KNN() {}
-        KNN(int, int, int, int, AccelerometerSample[]);
-        int predict(AccelerometerSample);
+        KNN(int, int, int, int, TrainingSample[]);
+        int predict(GestureSample);
 
     private:
         int num_features;
         int num_classes;
         int k;
-        int lenxTrain;
-        AccelerometerSample* xTrain;
-        AccelerometerSample* kNearest;
+        int lenXTrain;
+        TrainingSample* xTrain;
+        TrainingSample* kNearest;
 
         float *nearestDistances;
-        void calcKNearestNeighbours(AccelerometerSample);
-        float squared_euclidean_distance(AccelerometerSample, int);
+        void calcKNearestNeighbours(GestureSample);
+        float squared_euclidean_distance(GestureSample, int);
         void sortKNearestNeighbours();
         int majorityClass();
 };
 
-KNN::KNN(int num_features, int num_classes, int k, int lenxTrain, AccelerometerSample xTrain[]) {
+KNN::KNN(int num_features, int num_classes, int k, int lenXTrain, TrainingSample xTrain[]) {
     this->num_features = num_features;
     this->num_classes = num_classes;
     this->k = k;
-    this->lenxTrain = lenxTrain;
+    this->lenXTrain = lenXTrain;
     this->xTrain = xTrain;
     //Create two arrays to hold the nearest samples and nearest distances (used for predictions)
-    this->kNearest = new AccelerometerSample[k];
+    this->kNearest = new TrainingSample[k];
     this->nearestDistances = new float[k];
 
     //Initialise the nearestDistances array to very large values
-    //All the values calculated will be smaller than these so they will be place into the array
+    //All the values calculated will be smaller than these so they will be placed into the array
     for (int i = 0; i < k; i++) {
         nearestDistances[i] = 1e30f;
     }
 }
 
 //Predict the class of a given sample
-int KNN::predict(AccelerometerSample sample) {
+int KNN::predict(GestureSample sample) {
     calcKNearestNeighbours(sample); //Update the kNearest and nearestDistances arrays
     int prediction = majorityClass(); //Use the modal class of the kNearest samples to predict the class of the sample
 
@@ -73,8 +89,8 @@ int KNN::predict(AccelerometerSample sample) {
 }
 
 //Update the kNearest and nearestDistances arrays
-void KNN::calcKNearestNeighbours(AccelerometerSample s) {
-    for (int i = 0; i < this->lenxTrain; i++) {
+void KNN::calcKNearestNeighbours(GestureSample s) {
+    for (int i = 0; i < this->lenXTrain; i++) {
         //Calculate the distance between the sample s and this element in the xTrain array
         float dist = squared_euclidean_distance(s, i);
 
@@ -95,49 +111,16 @@ void KNN::calcKNearestNeighbours(AccelerometerSample s) {
 }
 
 //Calculate the Squared Euclidean distance between the given sample and the sample at the given index in the xTrain array
-float KNN::squared_euclidean_distance(AccelerometerSample sample1, int index) {
-    AccelerometerSample sample2 = xTrain[index];
-
-    //Scale features to stop distances becoming huge (aim is to try to scale features into range (-1, 1)
-    float scaledMeanX1 = sample1.meanX / 2048.0f, scaledMeanX2 = sample2.meanX / 2048.0f;
-    float scaledMeanY1 = sample1.meanY / 2048.0f, scaledMeanY2 = sample2.meanY / 2048.0f;
-    float scaledMeanZ1 = sample1.meanZ / 2048.0f, scaledMeanZ2 = sample2.meanZ / 2048.0f;
-    float scaledVarX1 = sample1.varX / 1e6f, scaledVarX2 = sample2.varX / 1e6f;
-    float scaledVarY1 = sample1.varY / 1e6f, scaledVarY2 = sample2.varY / 1e6f;
-    float scaledVarZ1 = sample1.varZ / 1e6f, scaledVarZ2 = sample2.varZ / 1e6f;
-    float scaledMinX1 = sample1.minX / 2048.0f, scaledMinX2 = sample2.minX / 2048.0f;
-    float scaledMaxX1 = sample1.maxX / 2048.0f, scaledMaxX2 = sample2.maxX / 2048.0f;
-    float scaledMinY1 = sample1.minY / 2048.0f, scaledMinY2 = sample2.minY / 2048.0f;
-    float scaledMaxY1 = sample1.maxY / 2048.0f, scaledMaxY2 = sample2.maxY / 2048.0f;
-    float scaledMinZ1 = sample1.minZ / 2048.0f, scaledMinZ2 = sample2.minZ / 2048.0f;
-    float scaledMaxZ1 = sample1.maxZ / 2048.0f, scaledMaxZ2 = sample2.maxZ / 2048.0f;
+float KNN::squared_euclidean_distance(GestureSample sample1, int index) {
+    GestureSample sample2 = xTrain[index].sample;
 
     //Calculate differences in variables
-    float diffMeanX = scaledMeanX1 - scaledMeanX2;
-    float diffMeanY = scaledMeanY1 - scaledMeanY2;
-    float diffMeanZ = scaledMeanZ1 - scaledMeanZ2;
-    float diffVarX = scaledVarX1 - scaledVarX2;
-    float diffVarY = scaledVarY1 - scaledVarY2;
-    float diffVarZ = scaledVarZ1 - scaledVarZ2;
-    float diffMinX = scaledMinX1 - scaledMinX2;
-    float diffMaxX = scaledMaxX1 - scaledMaxX2;
-    float diffMinY = scaledMinY1 - scaledMinY2;
-    float diffMaxY = scaledMaxY1 - scaledMaxY2;
-    float diffMinZ = scaledMinZ1 - scaledMinZ2;
-    float diffMaxZ = scaledMaxZ1 - scaledMaxZ2;
+    float dist = 0;
 
-    float dist = diffMeanX * diffMeanX +
-                diffMeanY * diffMeanY +
-                diffMeanZ * diffMeanZ +
-                diffVarX * diffVarX +
-                diffVarY * diffVarY +
-                diffVarZ * diffVarZ +
-                diffMinX * diffMinX +
-                diffMaxX * diffMaxX +
-                diffMinY * diffMinY +
-                diffMaxY * diffMaxY +
-                diffMinZ * diffMinZ +
-                diffMaxZ * diffMaxZ;
+    for (int i = 0; i < FEATURE_COUNT; i++) {
+        float featureDiff = sample1.features[i] - sample2.features[i];
+        dist += featureDiff * featureDiff;
+    }
 
     return dist;
 }
@@ -151,7 +134,7 @@ void KNN::sortKNearestNeighbours(){
                 nearestDistances[j] = nearestDistances[j+1];
                 nearestDistances[j+1] = tempDist;
 
-                AccelerometerSample tempSample = kNearest[j];
+                TrainingSample tempSample = kNearest[j];
                 kNearest[j] = kNearest[j+1];
                 kNearest[j+1] = tempSample;
             }
@@ -180,76 +163,144 @@ int KNN::majorityClass() {
     return majorityClass;
 }
 
-AccelerometerSample samples[NUM_SAMPLES]; //The training data for the model
+TrainingSample samples[NUM_SAMPLES]; //The training data for the model
 KNN model; //The KNN model instance
 
-AccelerometerSample takeSample(int sampleClass) {
+//Scale features to stop distances becoming huge
+void scaleFeatures(float* meanAccX, float* meanAccY, float* meanAccZ, float* varAccX, float* varAccY, float* varAccZ, float* minAccX, float* minAccY, float* minAccZ, float* maxAccX, float* maxAccY, float* maxAccZ,
+                    float* meanMagX, float* meanMagY, float* meanMagZ, float* varMagX, float* varMagY, float* varMagZ, float* minMagX, float* minMagY, float* minMagZ, float* maxMagX, float* maxMagY, float* maxMagZ) {
+    *meanAccX /= 2048.0f;
+    *meanAccY /= 2048.0f;
+    *meanAccZ /= 2048.0f;
+    *varAccX /= 1e6f;
+    *varAccY /= 1e6f;
+    *varAccZ /= 1e6f;
+    *minAccX /= 2048.0f;
+    *maxAccX /= 2048.0f;
+    *minAccY /= 2048.0f;
+    *maxAccY /= 2048.0f;
+    *minAccZ /= 2048.0f;
+    *maxAccZ /= 2048.0f;
+
+    *meanMagX /= 30000.0f;
+    *meanMagY /= 30000.0f;
+    *meanMagZ /= 30000.0f;
+    *varMagX /= 1e9f;
+    *varMagY /= 1e9f;
+    *varMagZ /= 1e9f;
+    *minMagX /= 30000.0f;
+    *maxMagX /= 30000.0f;
+    *minMagY /= 30000.0f;
+    *maxMagY /= 30000.0f;
+    *minMagZ /= 30000.0f;
+    *maxMagZ /= 30000.0f;
+}
+
+GestureSample takeSample() {
     uint64_t start = system_timer_current_time();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
     float count = 0;
-    float meanX = 0, meanY = 0, meanZ = 0;
-    float m2X = 0, m2Y = 0, m2Z = 0; //Running sum of squared differences from the mean
+    float meanAccX = 0, meanAccY = 0, meanAccZ = 0;
+    float m2AccX = 0, m2AccY = 0, m2AccZ = 0; //Running sum of squared differences from the mean
+    float minAccX = 2500, minAccY = 2500, minAccZ = 2500; //Set all the min values to something higher than a real sample
+    float maxAccX = -2500, maxAccY = -2500, maxAccZ = -2500; //Set all the max values to something lower than a real sample
 
-    float minX = 2500, minY = 2500, minZ = 2500; //Set all the min values to something higher than a real sample
-    float maxX = -2500, maxY = -2500, maxZ = -2500; //Set all the max values to something lower than a real sample
+    double dMeanMagX = 0, dMeanMagY = 0, dMeanMagZ = 0;
+    double m2MagX = 0, m2MagY = 0, m2MagZ = 0;
+    float minMagX = 1e9f, minMagY = 1e9f, minMagZ = 1e9f;
+    float maxMagX = -1e9f, maxMagY = -1e9f, maxMagZ = -1e9f;
 
     while (system_timer_current_time() - start < 1000) {
-        Sample3D sample = uBit.accelerometer.getSample();
+        Sample3D accSample = uBit.accelerometer.getSample();
+        int x = uBit.compass.getX();
+        int y = uBit.compass.getY();
+        int z = uBit.compass.getZ();
         count++;
 
-        float x = (float) sample.x, y = (float) sample.y, z = (float) sample.z;
+        auto accX = static_cast<float>(accSample.x), accY = static_cast<float>(accSample.y), accZ = static_cast<float>(accSample.z);
+        auto magX = static_cast<float>(x), magY = static_cast<float>(y), magZ = static_cast<float>(z);
 
-        //Update min and max values seen for each axis
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (z < minZ) minZ = z;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-        if (z > maxZ) maxZ = z;
+        //Update min and max values seen
+        if (accX < minAccX) minAccX = accX;
+        if (accY < minAccY) minAccY = accY;
+        if (accZ < minAccZ) minAccZ = accZ;
+        if (accX > maxAccX) maxAccX = accX;
+        if (accY > maxAccY) maxAccY = accY;
+        if (accZ > maxAccZ) maxAccZ = accZ;
 
-        //Calculate mean and variance for each axis
-        float diffX = x - meanX;
-        float diffY = y - meanY;
-        float diffZ = z - meanZ;
+        if (magX < minMagX) minMagX = magX;
+        if (magY < minMagY) minMagY = magY;
+        if (magZ < minMagZ) minMagZ = magZ;
+        if (magX > maxMagX) maxMagX = magX;
+        if (magY > maxMagY) maxMagY = magY;
+        if (magZ > maxMagZ) maxMagZ = magZ;
 
-        meanX += diffX / count;
-        meanY += diffY / count;
-        meanZ += diffZ / count;
+        //Calculate mean and variance
+        float diffAccX = accX - meanAccX;
+        float diffAccY = accY - meanAccY;
+        float diffAccZ = accZ - meanAccZ;
+        meanAccX += diffAccX / count;
+        meanAccY += diffAccY / count;
+        meanAccZ += diffAccZ / count;
+        m2AccX += diffAccX * (accX - meanAccX);
+        m2AccY += diffAccY * (accY - meanAccY);
+        m2AccZ += diffAccZ * (accZ - meanAccZ);
 
-        m2X += diffX * (x- meanX);
-        m2Y += diffY * (y - meanY);
-        m2Z += diffZ * (z - meanZ);
+        double diffMagX = magX - dMeanMagX;
+        double diffMagY = magY - dMeanMagY;
+        double diffMagZ = magZ - dMeanMagZ;
+        dMeanMagX += diffMagX / count;
+        dMeanMagY += diffMagY / count;
+        dMeanMagZ += diffMagZ / count;
+        m2MagX += diffMagX * (magX - dMeanMagX);
+        m2MagY += diffMagY * (magY - dMeanMagY);
+        m2MagZ += diffMagZ * (magZ - dMeanMagZ);
 
         uBit.sleep(2);
     }
 
-    //Calculate variance for the axes
-    float varX = m2X / (count - 1);
-    float varY = m2Y / (count - 1);
-    float varZ = m2Z / (count - 1);
+    //Calculate variance
+    float varAccX = m2AccX / (count - 1);
+    float varAccY = m2AccY / (count - 1);
+    float varAccZ = m2AccZ / (count - 1);
 
-    AccelerometerSample sample = {sampleClass, meanX, meanY, meanZ, varX, varY, varZ, minX, minY, minZ, maxX, maxY, maxZ};
+    float varMagX = static_cast<float>(m2MagX) / (count - 1);
+    float varMagY = static_cast<float>(m2MagY) / (count - 1);
+    float varMagZ = static_cast<float>(m2MagZ) / (count - 1);
+
+    //Cast mag mean values down to floats
+    auto meanMagX = static_cast<float>(dMeanMagX);
+    auto meanMagY = static_cast<float>(dMeanMagY);
+    auto meanMagZ = static_cast<float>(dMeanMagZ);
+
+    scaleFeatures(&meanAccX, &meanAccY, &meanAccZ, &varAccX, &varAccY, &varAccZ, &minAccX, &minAccY, &minAccZ, &maxAccX, &maxAccY, &maxAccZ,
+                    &meanMagX, &meanMagY, &meanMagZ, &varMagX, &varMagY, &varMagZ, &minMagX, &minMagY, &minMagZ, &maxMagX, &maxMagY, &maxMagZ);
+
+    GestureSample sample = {meanAccX, meanAccY, meanAccZ, varAccX, varAccY, varAccZ,
+                            minAccX, minAccY, minAccZ, maxAccX, maxAccY, maxAccZ,
+                            meanMagX, meanMagY, meanMagZ, varMagX, varMagY, varMagZ,
+                            minMagX, minMagY, minMagZ, maxMagX, maxMagY, maxMagZ};
 
     //Print the sample for debugging
-    uBit.serial.printf("%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d\r\n",
-        sampleClass,
-        (int) (meanX * 1000), (int) (meanY * 1000), (int) (meanZ * 1000),
-        (int) (varX * 1000), (int) (varY * 1000), (int) (varZ * 1000),
-        (int) minX, (int) minY, (int) minZ, (int) maxX, (int) maxY, (int) maxZ
-    );
+    for (float feature : sample.features) {
+        uBit.serial.printf("%d, ", static_cast<int>(feature * 1000));
+        uBit.sleep(2);
+    }
+    uBit.serial.printf("\r\n");
 
     return sample;
 }
 
 void onButtonA(MicroBitEvent e) {
-    AccelerometerSample sample = takeSample(currentClass);
+    GestureSample accSample = takeSample();
 
     if (training == TRUE) {
+        TrainingSample sample = {currentClass, accSample};
         samples[currentSample++] = sample;
     } else {
-        int prediction = model.predict(sample);
+        int prediction = model.predict(accSample);
         uBit.serial.printf("Prediction %d\r\n", prediction);
         uBit.display.print(prediction);
     }
@@ -260,13 +311,14 @@ void onButtonB(MicroBitEvent e) {
 }
 
 void onButtonAB(MicroBitEvent e) {
-    model = KNN(12, currentClass + 1, K_VALUE, currentSample, samples);
+    model = KNN(FEATURE_COUNT, currentClass + 1, K_VALUE, currentSample, samples);
     uBit.serial.printf("Model trained\r\n");
     training = FALSE;
 }
 
 int main() {
     uBit.init();
+    uBit.compass.calibrate();
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonB);
