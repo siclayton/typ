@@ -3,6 +3,7 @@
 
 #define NUM_SAMPLES 100
 #define K_VALUE 5
+#define FEATURE_COUNT 24
 #define TRUE 1
 #define FALSE 0
 
@@ -12,28 +13,8 @@ int currentSample = 0; //The position in the samples array to add the next sampl
 
 int training = TRUE;
 
-typedef enum {
-    //Mean movement in x,y and z axis across the time the sample was recorded for
-    MEAN_ACC_X, MEAN_ACC_Y, MEAN_ACC_Z,
-    //Variance of movement in x,y and z, across the time the sample was recorded for
-    VAR_ACC_X, VAR_ACC_Y, VAR_ACC_Z,
-    MIN_ACC_X, MIN_ACC_Y, MIN_ACC_Z,
-    MAX_ACC_X, MAX_ACC_Y, MAX_ACC_Z,
-
-    MEAN_MAG_X, MEAN_MAG_Y, MEAN_MAG_Z,
-    VAR_MAG_X, VAR_MAG_Y, VAR_MAG_Z,
-    MIN_MAG_X, MIN_MAG_Y, MIN_MAG_Z,
-    MAX_MAG_X, MAX_MAG_Y, MAX_MAG_Z,
-
-    FEATURE_COUNT
-} FeatureIndexes;
-
 typedef struct {
     float features[FEATURE_COUNT];
-
-    float getFeature(FeatureIndexes i) {
-        return features[i];
-    }
 } GestureSample;
 
 typedef struct {
