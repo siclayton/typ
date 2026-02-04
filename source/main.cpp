@@ -213,6 +213,7 @@ EnvironmentSample takeSample() {
     for (float feature : sample.features) {
         uBit.serial.printf("%d, ", static_cast<int>(feature * 1000));
     }
+    uBit.serial.printf("\r\n");
 
     return sample;
 }
