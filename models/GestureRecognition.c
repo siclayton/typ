@@ -188,6 +188,7 @@ GestureSample takeSample() {
     float minAccX = 2500, minAccY = 2500, minAccZ = 2500; //Set all the min values to something higher than a real sample
     float maxAccX = -2500, maxAccY = -2500, maxAccZ = -2500; //Set all the max values to something lower than a real sample
 
+    //As mag values can be large, the mean and m2 values are stored as doubles to prevent overflow
     double dMeanMagX = 0, dMeanMagY = 0, dMeanMagZ = 0;
     double m2MagX = 0, m2MagY = 0, m2MagZ = 0;
     float minMagX = 1e9f, minMagY = 1e9f, minMagZ = 1e9f;
