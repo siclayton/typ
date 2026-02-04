@@ -1,287 +1,232 @@
 #include "MicroBit.h"
-#include "samples/Tests.h"
 
-#define NUM_SAMPLES 100
-#define K_VALUE 5
-#define FEATURE_COUNT 24
+#define NUM_SAMPLES 20
+#define NUM_BINS 4
+#define FEATURE_COUNT 4
 #define TRUE 1
 #define FALSE 0
 
 MicroBit uBit;
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
-
 int training = TRUE;
 
 typedef struct {
     float features[FEATURE_COUNT];
-} GestureSample;
+} EnvironmentSample;
 
 typedef struct {
     int sampleClass;
-    GestureSample sample;
+    EnvironmentSample sample;
 } TrainingSample;
 
-//The KNN model
-class KNN {
+class NaiveBayesModel {
     public:
-        KNN() {}
-        KNN(int, int, int, int, TrainingSample[]);
-        int predict(GestureSample);
+        NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, TrainingSample* xTrain);
+        int predict(EnvironmentSample sample);
 
     private:
-        int num_features;
-        int num_classes;
-        int k;
+        int numFeatures;
+        int numClasses;
         int lenXTrain;
         TrainingSample* xTrain;
-        TrainingSample* kNearest;
+        int* classCounts;
+        float* classProbabilities;
+        float* conditionalProbabilities;
 
-        float *nearestDistances;
-        void calcKNearestNeighbours(GestureSample);
-        float squared_euclidean_distance(GestureSample, int);
-        void sortKNearestNeighbours();
-        int majorityClass();
+        //Set mins initially to a large value and set maxes initially to 0
+        float* minFeatureValues;
+        float* maxFeatureValues;
+
+        void trainModel();
+        void calcClassProbabilities();
+        void calcConditionalProbabilities();
+        int getCProbIndex(int c, int feature, int bin);
+        int getBin(int feature, float value);
 };
 
-KNN::KNN(int num_features, int num_classes, int k, int lenXTrain, TrainingSample xTrain[]) {
-    this->num_features = num_features;
-    this->num_classes = num_classes;
-    this->k = k;
+NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, TrainingSample* xTrain) {
+    this->numFeatures = numFeatures;
+    this->numClasses = numClasses;
     this->lenXTrain = lenXTrain;
     this->xTrain = xTrain;
-    //Create two arrays to hold the nearest samples and nearest distances (used for predictions)
-    this->kNearest = new TrainingSample[k];
-    this->nearestDistances = new float[k];
 
-    //Initialise the nearestDistances array to very large values
-    //All the values calculated will be smaller than these so they will be placed into the array
-    for (int i = 0; i < k; i++) {
-        nearestDistances[i] = 1e30f;
+    this->classCounts = new int[numClasses]();
+    this->classProbabilities = new float[numClasses];
+    this->conditionalProbabilities = new float[numClasses * numFeatures * NUM_BINS]();
+    this->minFeatureValues = new float[numFeatures];
+    this->maxFeatureValues = new float[numFeatures];
+
+    for (int i = 0; i < numFeatures; i++) {
+        float value = xTrain[0].sample.features[i];
+        maxFeatureValues[i] = value;
+        minFeatureValues[i] = value;
+    }
+
+    trainModel();
+}
+
+void NaiveBayesModel::trainModel() {
+    for (int i = 0; i < lenXTrain; i++) {
+        //Count the number of occurrences of each class in the training data
+        classCounts[xTrain[i].sampleClass]++;
+
+        //Find min and max values for each feature (used to determine the bin sizes)
+        for (int j = 0; j < numFeatures; j++) {
+            float value = xTrain[i].sample.features[j];
+
+            if (value < minFeatureValues[j]) minFeatureValues[j] = value;
+            if (value > maxFeatureValues[j]) maxFeatureValues[j] = value;
+        }
+    }
+
+    calcClassProbabilities();
+    calcConditionalProbabilities();
+
+    for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i++) {
+        uBit.serial.printf("%d, ", static_cast<int>(conditionalProbabilities[i] * 1000));
+        if ((i + 1) % 4 == 0) uBit.serial.printf("\r\n");
     }
 }
 
-//Predict the class of a given sample
-int KNN::predict(GestureSample sample) {
-    calcKNearestNeighbours(sample); //Update the kNearest and nearestDistances arrays
-    int prediction = majorityClass(); //Use the modal class of the kNearest samples to predict the class of the sample
+void NaiveBayesModel::calcClassProbabilities() {
+    for (int i = 0; i < numClasses; i++) {
+        classProbabilities[i] = static_cast<float>(classCounts[i]) / static_cast<float>(lenXTrain);
+    }
+}
+
+void NaiveBayesModel::calcConditionalProbabilities() {
+    //Count how many occurrences of each feature "value" there are
+    //The values have been split into 4 bins
+    for (int i = 0; i < lenXTrain; i++) {
+        for (int j = 0; j < numFeatures; j++) {
+            TrainingSample sample = xTrain[i];
+            float value = sample.sample.features[j];
+
+            int bin = getBin(j, value);
+            conditionalProbabilities[getCProbIndex(sample.sampleClass, j, bin)]++;
+        }
+    }
+
+    //Convert to probabilities
+    for (int i = 0; i < numClasses; i ++) {
+        for (int j = 0; j < numFeatures; j++) {
+            for (int k = 0; k < NUM_BINS; k++)
+            {
+                int index = getCProbIndex(i,j,k);
+                conditionalProbabilities[index] /= static_cast<float>(classCounts[i]);
+
+                //If the combination of class, feature and bin didn't appear in the dataset,
+                //set the probability to a very low number (so the combination isn't completely ignored during predictions)
+                if (conditionalProbabilities[index] == 0) conditionalProbabilities[index] = 1e-4;
+            }
+        }
+    }
+}
+
+int NaiveBayesModel::getCProbIndex(int c, int feature, int bin) {
+    return c * numFeatures * NUM_BINS + feature * NUM_BINS + bin;
+}
+
+int NaiveBayesModel::getBin(int feature, float value) {
+    float range = maxFeatureValues[feature] - minFeatureValues[feature];
+    if (range < 1e-6) return 0;
+
+    float binSize = range / NUM_BINS;
+
+    int bin = static_cast<int>((value - minFeatureValues[feature]) / binSize);
+
+    //Ensure bin isn't out of range
+    if (bin >= NUM_BINS) bin = NUM_BINS - 1;
+    if (bin < 0) bin = 0;
+
+    return bin;
+}
+
+int NaiveBayesModel::predict(EnvironmentSample sample) {
+    int prediction = 0;
+    float highestProbability = -1e30f; //Set highestProbability to a low negative number
+
+    for (int i = 0; i < numClasses; i++) {
+        //Use log probabilities to prevent underflow
+        float classProbability = log(classProbabilities[i]);
+
+        for (int j = 0; j < numFeatures; j++) {
+            float value = sample.features[j];
+            int bin = getBin(j, value);
+            int cProbIndex = getCProbIndex(i, j, bin);
+
+            classProbability += log(conditionalProbabilities[cProbIndex]);
+        }
+
+        if (classProbability > highestProbability) {
+            highestProbability = classProbability;
+            prediction = i;
+        }
+    }
 
     return prediction;
 }
 
-//Update the kNearest and nearestDistances arrays
-void KNN::calcKNearestNeighbours(GestureSample s) {
-    for (int i = 0; i < this->lenXTrain; i++) {
-        //Calculate the distance between the sample s and this element in the xTrain array
-        float dist = squared_euclidean_distance(s, i);
+TrainingSample samples[NUM_SAMPLES];
+//Initialise the model variable to nothing (until the model is trained)
+//Acts as a placeholder until a trained model is created
+NaiveBayesModel* model = nullptr;
 
-        //If the kNearest array isn't full or the distance to this element is less than the lowest distance in the nearestDistances array,
-        //Add the sample to the kNearest samples and the distance to the nearestDistances array
-        if (i < k) {
-            nearestDistances[i] = dist;
-            kNearest[i] = xTrain[i];
-        } else {
-            //Sort the arrays, so the lowest distance is at index k-1
-            sortKNearestNeighbours();
-            if (dist < nearestDistances[k-1]) {
-                nearestDistances[k-1] = dist;
-                kNearest[k-1] = xTrain[i];
-            }
-        }
-    }
-}
 
-//Calculate the Squared Euclidean distance between the given sample and the sample at the given index in the xTrain array
-float KNN::squared_euclidean_distance(GestureSample sample1, int index) {
-    GestureSample sample2 = xTrain[index].sample;
-
-    //Calculate differences in variables
-    float dist = 0;
-
-    for (int i = 0; i < FEATURE_COUNT; i++) {
-        float featureDiff = sample1.features[i] - sample2.features[i];
-        dist += featureDiff * featureDiff;
-    }
-
-    return dist;
-}
-
-//Sort the kNearest and nearestDistances arrays, using bubble sort
-void KNN::sortKNearestNeighbours(){
-    for (int i = 0; i < k - 1; i++) {
-        for (int j = 0; j < k - i - 1; j++) {
-            if (nearestDistances[j] > nearestDistances[j + 1]) {
-                float tempDist = nearestDistances[j];
-                nearestDistances[j] = nearestDistances[j+1];
-                nearestDistances[j+1] = tempDist;
-
-                TrainingSample tempSample = kNearest[j];
-                kNearest[j] = kNearest[j+1];
-                kNearest[j+1] = tempSample;
-            }
-        }
-    }
-}
-
-//Determine the modal class of the kNearest array
-int KNN::majorityClass() {
-    int majorityClass = 0, maxCount = 0;
-
-    for (int i = 0; i < num_classes; i++) {
-        int classCount = 0;
-
-        for (int j = 0; j < k; j++) {
-            if (kNearest[j].sampleClass == i) {
-                classCount++;
-            }
-        }
-
-        if (classCount > maxCount) {
-            maxCount = classCount;
-            majorityClass = i;
-        }
-    }
-    return majorityClass;
-}
-
-TrainingSample samples[NUM_SAMPLES]; //The training data for the model
-KNN model; //The KNN model instance
-
-//Scale features to stop distances becoming huge
-void scaleFeatures(float* meanAccX, float* meanAccY, float* meanAccZ, float* varAccX, float* varAccY, float* varAccZ, float* minAccX, float* minAccY, float* minAccZ, float* maxAccX, float* maxAccY, float* maxAccZ,
-                    float* meanMagX, float* meanMagY, float* meanMagZ, float* varMagX, float* varMagY, float* varMagZ, float* minMagX, float* minMagY, float* minMagZ, float* maxMagX, float* maxMagY, float* maxMagZ) {
-    *meanAccX /= 2048.0f;
-    *meanAccY /= 2048.0f;
-    *meanAccZ /= 2048.0f;
-    *varAccX /= 1e6f;
-    *varAccY /= 1e6f;
-    *varAccZ /= 1e6f;
-    *minAccX /= 2048.0f;
-    *maxAccX /= 2048.0f;
-    *minAccY /= 2048.0f;
-    *maxAccY /= 2048.0f;
-    *minAccZ /= 2048.0f;
-    *maxAccZ /= 2048.0f;
-
-    *meanMagX /= 30000.0f;
-    *meanMagY /= 30000.0f;
-    *meanMagZ /= 30000.0f;
-    *varMagX /= 1e9f;
-    *varMagY /= 1e9f;
-    *varMagZ /= 1e9f;
-    *minMagX /= 30000.0f;
-    *maxMagX /= 30000.0f;
-    *minMagY /= 30000.0f;
-    *maxMagY /= 30000.0f;
-    *minMagZ /= 30000.0f;
-    *maxMagZ /= 30000.0f;
-}
-
-GestureSample takeSample() {
+EnvironmentSample takeSample() {
+    uBit.display.clear();
+    uBit.sleep(50);
     uint64_t start = system_timer_current_time();
 
     //The mean and variance of the samples is calculated using Welford's algorithm
     //This allows for calculations are the stream of inputs is coming in
     float count = 0;
-    float meanAccX = 0, meanAccY = 0, meanAccZ = 0;
-    float m2AccX = 0, m2AccY = 0, m2AccZ = 0; //Running sum of squared differences from the mean
-    float minAccX = 2500, minAccY = 2500, minAccZ = 2500; //Set all the min values to something higher than a real sample
-    float maxAccX = -2500, maxAccY = -2500, maxAccZ = -2500; //Set all the max values to something lower than a real sample
+    float meanTemp = 0;
+    float m2Temp = 0; //Running sum of squared differences from the mean
 
-    double dMeanMagX = 0, dMeanMagY = 0, dMeanMagZ = 0;
-    double m2MagX = 0, m2MagY = 0, m2MagZ = 0;
-    float minMagX = 1e9f, minMagY = 1e9f, minMagZ = 1e9f;
-    float maxMagX = -1e9f, maxMagY = -1e9f, maxMagZ = -1e9f;
+    float meanLightLevel = 0;
+    float m2LightLevel = 0;
 
     while (system_timer_current_time() - start < 1000) {
-        Sample3D accSample = uBit.accelerometer.getSample();
-        int x = uBit.compass.getX();
-        int y = uBit.compass.getY();
-        int z = uBit.compass.getZ();
+        int tempValue = uBit.thermometer.getTemperature();
+        int lightLevelValue = uBit.display.readLightLevel();
         count++;
 
-        auto accX = static_cast<float>(accSample.x), accY = static_cast<float>(accSample.y), accZ = static_cast<float>(accSample.z);
-        auto magX = static_cast<float>(x), magY = static_cast<float>(y), magZ = static_cast<float>(z);
+        //Calculate mean and variance for each axis
+        float tempDiff = static_cast<float>(tempValue) - meanTemp;
+        meanTemp += tempDiff / count;
+        m2Temp += tempDiff * (tempValue - meanTemp);
 
-        //Update min and max values seen
-        if (accX < minAccX) minAccX = accX;
-        if (accY < minAccY) minAccY = accY;
-        if (accZ < minAccZ) minAccZ = accZ;
-        if (accX > maxAccX) maxAccX = accX;
-        if (accY > maxAccY) maxAccY = accY;
-        if (accZ > maxAccZ) maxAccZ = accZ;
+        float lightLevelDiff = static_cast<float>(lightLevelValue) - meanLightLevel;
+        meanLightLevel += lightLevelDiff / count;
+        m2LightLevel += lightLevelDiff * (lightLevelValue - meanLightLevel);
 
-        if (magX < minMagX) minMagX = magX;
-        if (magY < minMagY) minMagY = magY;
-        if (magZ < minMagZ) minMagZ = magZ;
-        if (magX > maxMagX) maxMagX = magX;
-        if (magY > maxMagY) maxMagY = magY;
-        if (magZ > maxMagZ) maxMagZ = magZ;
-
-        //Calculate mean and variance
-        float diffAccX = accX - meanAccX;
-        float diffAccY = accY - meanAccY;
-        float diffAccZ = accZ - meanAccZ;
-        meanAccX += diffAccX / count;
-        meanAccY += diffAccY / count;
-        meanAccZ += diffAccZ / count;
-        m2AccX += diffAccX * (accX - meanAccX);
-        m2AccY += diffAccY * (accY - meanAccY);
-        m2AccZ += diffAccZ * (accZ - meanAccZ);
-
-        double diffMagX = magX - dMeanMagX;
-        double diffMagY = magY - dMeanMagY;
-        double diffMagZ = magZ - dMeanMagZ;
-        dMeanMagX += diffMagX / count;
-        dMeanMagY += diffMagY / count;
-        dMeanMagZ += diffMagZ / count;
-        m2MagX += diffMagX * (magX - dMeanMagX);
-        m2MagY += diffMagY * (magY - dMeanMagY);
-        m2MagZ += diffMagZ * (magZ - dMeanMagZ);
-
-        uBit.sleep(2);
+        uBit.sleep(20);
     }
 
-    //Calculate variance
-    float varAccX = m2AccX / (count - 1);
-    float varAccY = m2AccY / (count - 1);
-    float varAccZ = m2AccZ / (count - 1);
+    float tempVariance = m2Temp / (count - 1);
+    float lightLevelVariance = m2LightLevel / (count - 1);
 
-    float varMagX = static_cast<float>(m2MagX) / (count - 1);
-    float varMagY = static_cast<float>(m2MagY) / (count - 1);
-    float varMagZ = static_cast<float>(m2MagZ) / (count - 1);
+    EnvironmentSample sample = {meanTemp, meanLightLevel, tempVariance, lightLevelVariance};
 
-    //Cast mag mean values down to floats
-    auto meanMagX = static_cast<float>(dMeanMagX);
-    auto meanMagY = static_cast<float>(dMeanMagY);
-    auto meanMagZ = static_cast<float>(dMeanMagZ);
-
-    scaleFeatures(&meanAccX, &meanAccY, &meanAccZ, &varAccX, &varAccY, &varAccZ, &minAccX, &minAccY, &minAccZ, &maxAccX, &maxAccY, &maxAccZ,
-                    &meanMagX, &meanMagY, &meanMagZ, &varMagX, &varMagY, &varMagZ, &minMagX, &minMagY, &minMagZ, &maxMagX, &maxMagY, &maxMagZ);
-
-    GestureSample sample = {meanAccX, meanAccY, meanAccZ, varAccX, varAccY, varAccZ,
-                            minAccX, minAccY, minAccZ, maxAccX, maxAccY, maxAccZ,
-                            meanMagX, meanMagY, meanMagZ, varMagX, varMagY, varMagZ,
-                            minMagX, minMagY, minMagZ, maxMagX, maxMagY, maxMagZ};
-
-    //Print the sample for debugging
     for (float feature : sample.features) {
         uBit.serial.printf("%d, ", static_cast<int>(feature * 1000));
-        uBit.sleep(2);
     }
-    uBit.serial.printf("\r\n");
 
     return sample;
 }
 
 void onButtonA(MicroBitEvent e) {
-    GestureSample accSample = takeSample();
+    EnvironmentSample envSample = takeSample();
 
+    //If in training mode, label sample and add it to list of samples used to train the model
+    //Otherwise, predict the class of the sample collected
     if (training == TRUE) {
-        TrainingSample sample = {currentClass, accSample};
+        TrainingSample sample = {currentClass, envSample};
         samples[currentSample++] = sample;
     } else {
-        int prediction = model.predict(accSample);
+        int prediction = model->predict(envSample);
         uBit.serial.printf("Prediction %d\r\n", prediction);
         uBit.display.print(prediction);
     }
@@ -292,14 +237,17 @@ void onButtonB(MicroBitEvent e) {
 }
 
 void onButtonAB(MicroBitEvent e) {
-    model = KNN(FEATURE_COUNT, currentClass + 1, K_VALUE, currentSample, samples);
+    delete model;
+    model = new NaiveBayesModel(4, currentClass + 1, currentSample, samples);
+
     uBit.serial.printf("Model trained\r\n");
     training = FALSE;
 }
 
 int main() {
     uBit.init();
-    uBit.compass.calibrate();
+
+    uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE_LIGHT_SENSE);
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonB);

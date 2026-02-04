@@ -2,6 +2,7 @@
 
 #define NUM_SAMPLES 20
 #define NUM_BINS 4
+#define FEATURE_COUNT 4
 #define TRUE 1
 #define FALSE 0
 
@@ -11,36 +12,24 @@ int currentSample = 0; //The position in the samples array to add the next sampl
 int training = TRUE;
 
 typedef struct {
-    int sampleClass;
-
-    float meanTemp;
-    float meanLightLevel;
-
-    float tempVariance;
-    float lightLevelVariance;
-
-    float getFeature(int index) {
-        switch (index) {
-            case 0: return meanTemp;
-            case 1: return meanLightLevel;
-            case 2: return tempVariance;
-            case 3: return lightLevelVariance;
-            default: return 0;
-        }
-    }
-
+    float features[FEATURE_COUNT];
 } EnvironmentSample;
+
+typedef struct {
+    int sampleClass;
+    EnvironmentSample sample;
+} TrainingSample;
 
 class NaiveBayesModel {
     public:
-        NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, EnvironmentSample* xTrain);
+        NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, TrainingSample* xTrain);
         int predict(EnvironmentSample sample);
 
     private:
         int numFeatures;
         int numClasses;
         int lenXTrain;
-        EnvironmentSample* xTrain;
+        TrainingSample* xTrain;
         int* classCounts;
         float* classProbabilities;
         float* conditionalProbabilities;
@@ -56,7 +45,7 @@ class NaiveBayesModel {
         int getBin(int feature, float value);
 };
 
-NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, EnvironmentSample* xTrain) {
+NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, TrainingSample* xTrain) {
     this->numFeatures = numFeatures;
     this->numClasses = numClasses;
     this->lenXTrain = lenXTrain;
@@ -69,7 +58,7 @@ NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain,
     this->maxFeatureValues = new float[numFeatures];
 
     for (int i = 0; i < numFeatures; i++) {
-        float value = xTrain[0].getFeature(i);
+        float value = xTrain[0].sample.features[i];
         maxFeatureValues[i] = value;
         minFeatureValues[i] = value;
     }
@@ -84,7 +73,7 @@ void NaiveBayesModel::trainModel() {
 
         //Find min and max values for each feature (used to determine the bin sizes)
         for (int j = 0; j < numFeatures; j++) {
-            float value = xTrain[i].getFeature(j);
+            float value = xTrain[i].sample.features[j];
 
             if (value < minFeatureValues[j]) minFeatureValues[j] = value;
             if (value > maxFeatureValues[j]) maxFeatureValues[j] = value;
@@ -95,7 +84,7 @@ void NaiveBayesModel::trainModel() {
     calcConditionalProbabilities();
 
     for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i++) {
-        uBit.serial.printf("%d, ", (int)(conditionalProbabilities[i] * 1000));
+        uBit.serial.printf("%d, ", static_cast<int>(conditionalProbabilities[i] * 1000));
         if ((i + 1) % 4 == 0) uBit.serial.printf("\r\n");
     }
 }
@@ -111,8 +100,8 @@ void NaiveBayesModel::calcConditionalProbabilities() {
     //The values have been split into 4 bins
     for (int i = 0; i < lenXTrain; i++) {
         for (int j = 0; j < numFeatures; j++) {
-            EnvironmentSample sample = xTrain[i];
-            float value = sample.getFeature(j);
+            TrainingSample sample = xTrain[i];
+            float value = sample.sample.features[j];
 
             int bin = getBin(j, value);
             conditionalProbabilities[getCProbIndex(sample.sampleClass, j, bin)]++;
@@ -163,7 +152,7 @@ int NaiveBayesModel::predict(EnvironmentSample sample) {
         float classProbability = log(classProbabilities[i]);
 
         for (int j = 0; j < numFeatures; j++) {
-            float value = sample.getFeature(j);
+            float value = sample.features[j];
             int bin = getBin(j, value);
             int cProbIndex = getCProbIndex(i, j, bin);
 
@@ -179,13 +168,13 @@ int NaiveBayesModel::predict(EnvironmentSample sample) {
     return prediction;
 }
 
-EnvironmentSample samples[NUM_SAMPLES];
+TrainingSample samples[NUM_SAMPLES];
 //Initialise the model variable to nothing (until the model is trained)
 //Acts as a placeholder until a trained model is created
 NaiveBayesModel* model = nullptr;
 
 
-EnvironmentSample takeSample(int sampleClass) {
+EnvironmentSample takeSample() {
     uBit.display.clear();
     uBit.sleep(50);
     uint64_t start = system_timer_current_time();
@@ -219,25 +208,25 @@ EnvironmentSample takeSample(int sampleClass) {
     float tempVariance = m2Temp / (count - 1);
     float lightLevelVariance = m2LightLevel / (count - 1);
 
-    EnvironmentSample sample = {sampleClass, meanTemp, meanLightLevel, tempVariance, lightLevelVariance};
+    EnvironmentSample sample = {meanTemp, meanLightLevel, tempVariance, lightLevelVariance};
 
-    uBit.serial.printf("%d, %d, %d, %d, %d\r\n",
-        sampleClass, static_cast<int>(meanTemp * 1000), static_cast<int>(meanLightLevel * 1000),
-        static_cast<int>(tempVariance * 1000), static_cast<int>(lightLevelVariance * 1000)
-    );
+    for (float feature : sample.features) {
+        uBit.serial.printf("%d, ", static_cast<int>(feature * 1000));
+    }
 
     return sample;
 }
 
 void onButtonA(MicroBitEvent e) {
-    EnvironmentSample sample = takeSample(currentClass);
+    EnvironmentSample envSample = takeSample();
 
     //If in training mode, label sample and add it to list of samples used to train the model
     //Otherwise, predict the class of the sample collected
     if (training == TRUE) {
+        TrainingSample sample = {currentClass, envSample};
         samples[currentSample++] = sample;
     } else {
-        int prediction = model->predict(sample);
+        int prediction = model->predict(envSample);
         uBit.serial.printf("Prediction %d\r\n", prediction);
         uBit.display.print(prediction);
     }
@@ -257,7 +246,6 @@ void onButtonAB(MicroBitEvent e) {
 
 int main() {
     uBit.init();
-    uBit.serial.setBaud(115200);
 
     uBit.display.setDisplayMode(DISPLAY_MODE_BLACK_AND_WHITE_LIGHT_SENSE);
 
