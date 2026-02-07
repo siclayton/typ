@@ -139,6 +139,8 @@ if("${device.definitions}" STRGREATER "")
     add_definitions("${device.definitions}")
 endif()
 
+add_definitions(-DCODAL_ENABLE_LOGGING)
+
 ####################
 # optional JSON flags for compilation + assembly
 ###################

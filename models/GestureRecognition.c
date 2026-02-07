@@ -1,6 +1,8 @@
 #include "MicroBit.h"
 #include "samples/Tests.h"
 
+#include <cstdio>
+
 #define NUM_SAMPLES 100
 #define K_VALUE 5
 #define FEATURE_COUNT 24
@@ -260,17 +262,31 @@ GestureSample takeSample() {
     scaleFeatures(&meanAccX, &meanAccY, &meanAccZ, &varAccX, &varAccY, &varAccZ, &minAccX, &minAccY, &minAccZ, &maxAccX, &maxAccY, &maxAccZ,
                     &meanMagX, &meanMagY, &meanMagZ, &varMagX, &varMagY, &varMagZ, &minMagX, &minMagY, &minMagZ, &maxMagX, &maxMagY, &maxMagZ);
 
-    GestureSample sample = {meanAccX, meanAccY, meanAccZ, varAccX, varAccY, varAccZ,
-                            minAccX, minAccY, minAccZ, maxAccX, maxAccY, maxAccZ,
-                            meanMagX, meanMagY, meanMagZ, varMagX, varMagY, varMagZ,
-                            minMagX, minMagY, minMagZ, maxMagX, maxMagY, maxMagZ};
+    GestureSample sample = {
+        {meanAccX, meanAccY, meanAccZ, varAccX, varAccY, varAccZ,
+        minAccX, minAccY, minAccZ, maxAccX, maxAccY, maxAccZ,
+        meanMagX, meanMagY, meanMagZ, varMagX, varMagY, varMagZ,
+        minMagX, minMagY, minMagZ, maxMagX, maxMagY, maxMagZ}
+    };
+
 
     //Print the sample for debugging
-    for (float feature : sample.features) {
-        uBit.serial.printf("%d, ", static_cast<int>(feature * 1000));
-        uBit.sleep(2);
+    //Build the line to print in a buffer and print once (to put everything on one line in the output)
+    char buf[128];
+    int offset = 0;
+
+    for (int i = 0; i < FEATURE_COUNT; i++) {
+        int value = static_cast<int>(sample.features[i] * 1000);
+        offset += snprintf(
+            buf + offset,
+            sizeof(buf) - offset,
+            "%d%s",
+            value,
+            i < FEATURE_COUNT - 1 ? "," : ""
+        );
     }
-    uBit.serial.printf("\r\n");
+
+    DMESG("%s", buf);
 
     return sample;
 }
