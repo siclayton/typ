@@ -1,12 +1,16 @@
 #include "MicroBit.h"
-#define ARM_MATH_CM4
 #include "arm_math.h"
 
-#define MIC_SAMPLE_RATE         (11 * 1024)
-#define AUDIO_SAMPLES_NUMBER    1024
+#define SAMPLE_RATE (11 * 1024)
+#define AUDIO_SAMPLES_NUMBER 1024
+#define NUM_BINS 10
+#define FFT_SIZE 254
 
 MicroBit uBit;
 arm_rfft_fast_instance_f32 fftInstance;
+
+int melBins[NUM_BINS + 2];
+float melFilters[NUM_BINS][FFT_SIZE/2];
 
 typedef struct {
 
@@ -34,6 +38,41 @@ SpeechSample takeSample() {
 
     // Pack feature vector returned by mel filter bank calculations into a SpeechSample
     return SpeechSample();
+}
+
+float hzToMel(float hz) {
+    return 2595.0f * log10f(1.0f + hz / 700.0f);
+}
+
+float melToHz(float mel) {
+    return 700.0f * (powf(10.0f, mel / 2959.0f) - 1.0f);
+}
+
+void computeMelFilterbank() {
+    float low = hzToMel(0);
+    float high = hzToMel(SAMPLE_RATE / 2);
+    float step = (high - low) / NUM_BINS + 1;
+
+    // Calculate what mel values go into each fft bin
+    for (int i = 0; i < NUM_BINS + 2; i++) {
+        float hz = melToHz(low + i * step);
+
+        melBins[i] = static_cast<int>((FFT_SIZE + 1) * hz / SAMPLE_RATE);
+    }
+
+    // Build mel triangle
+    for (int i = 0; i < NUM_BINS; i++) {
+        int left = melBins[i];
+        int centre = melBins[i + 1];
+        int right = melBins[i + 2];
+
+        for (int j = left; j < centre; j++) {
+            melFilters[i][j] = static_cast<float>((j - left) / (centre - left));
+        }
+        for (int j = centre; j < right; j++) {
+            melFilters[i][j] = static_cast<float>((right - j) / (right - centre));
+        }
+    }
 }
 
 void onButtonA(MicroBitEvent e){
