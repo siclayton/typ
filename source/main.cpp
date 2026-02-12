@@ -3,23 +3,36 @@
 
 #define SAMPLE_RATE (11 * 1024)
 #define AUDIO_SAMPLES_NUMBER 1024
-#define NUM_BINS 10
+#define NUM_MEL_FILTERS 10
 #define FFT_SIZE 254
 
 MicroBit uBit;
 arm_rfft_fast_instance_f32 fftInstance;
 
-int melBins[NUM_BINS + 2];
-float melFilters[NUM_BINS][FFT_SIZE/2];
+int melBins[NUM_MEL_FILTERS + 2];
+float melWeights[NUM_MEL_FILTERS][FFT_SIZE/2];
 
 typedef struct {
-
+    float features[NUM_MEL_FILTERS];
 } SpeechSample;
 
 typedef struct {
     int sampleClass;
     SpeechSample sample;
 } TrainingSample;
+
+void applyMelFilters(float* fft, float* mel) {
+    // Loop over the filters
+    for (int i = 0; i < NUM_MEL_FILTERS; i++) {
+        float sum = 0;
+
+        for (int j = melBins[i]; j < melBins[i + 2]; j++) {
+            sum += fft[j] * melWeights[i][j];
+        }
+
+        mel[i] = logf(sum);
+    }
+}
 
 SpeechSample takeSample() {
 
@@ -33,8 +46,8 @@ SpeechSample takeSample() {
     arm_rfft_fast_f32(&fftInstance, buf + offset, fftOutput, 0);
     arm_cmplx_mag_f32(fftOutput, magnitudeSpectrum, AUDIO_SAMPLES_NUMBER / 2);
 
-    // Apply Mel filter bank
-        // Do not need to compute the triangles here (that should be done on start up)
+    auto* melOutput = static_cast<float *>(malloc(sizeof(float) * NUM_MEL_FILTERS));
+    applyMelFilters(fftOutput, melOutput);
 
     // Pack feature vector returned by mel filter bank calculations into a SpeechSample
     return SpeechSample();
@@ -51,26 +64,29 @@ float melToHz(float mel) {
 void computeMelFilterbank() {
     float low = hzToMel(0);
     float high = hzToMel(SAMPLE_RATE / 2);
-    float step = (high - low) / NUM_BINS + 1;
+    float step = (high - low) / NUM_MEL_FILTERS + 1;
 
     // Calculate what mel values go into each fft bin
-    for (int i = 0; i < NUM_BINS + 2; i++) {
+    // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points (
+    for (int i = 0; i < NUM_MEL_FILTERS + 2; i++) {
         float hz = melToHz(low + i * step);
 
         melBins[i] = static_cast<int>((FFT_SIZE + 1) * hz / SAMPLE_RATE);
     }
 
     // Build mel triangle
-    for (int i = 0; i < NUM_BINS; i++) {
+    for (int i = 0; i < NUM_MEL_FILTERS; i++) {
         int left = melBins[i];
         int centre = melBins[i + 1];
         int right = melBins[i + 2];
 
+        // Rising slope
         for (int j = left; j < centre; j++) {
-            melFilters[i][j] = static_cast<float>((j - left) / (centre - left));
+            melWeights[i][j] = static_cast<float>((j - left) / (centre - left));
         }
+        // Falling slope
         for (int j = centre; j < right; j++) {
-            melFilters[i][j] = static_cast<float>((right - j) / (right - centre));
+            melWeights[i][j] = static_cast<float>((right - j) / (right - centre));
         }
     }
 }
