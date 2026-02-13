@@ -39,18 +39,28 @@ SpeechSample takeSample() {
     // Capture a seconds worth of audio
         // Will output the buf used in fft function call
 
-    // Calculate FFT and mag
+    // Calculate FFT and magnitude spectrum
     auto* fftOutput = static_cast<float *>(malloc(sizeof(float) * AUDIO_SAMPLES_NUMBER));
     auto* magnitudeSpectrum = static_cast<float *>(malloc(sizeof(float) * AUDIO_SAMPLES_NUMBER / 2));
 
     arm_rfft_fast_f32(&fftInstance, buf + offset, fftOutput, 0);
     arm_cmplx_mag_f32(fftOutput, magnitudeSpectrum, AUDIO_SAMPLES_NUMBER / 2);
 
+    // Apply Mel Filterbank to the magnitude spectrum
     auto* melOutput = static_cast<float *>(malloc(sizeof(float) * NUM_MEL_FILTERS));
     applyMelFilters(fftOutput, melOutput);
 
     // Pack feature vector returned by mel filter bank calculations into a SpeechSample
-    return SpeechSample();
+    SpeechSample sample;
+    for (int i = 0; i < NUM_MEL_FILTERS; i++) {
+        sample.features[i] = melOutput[i];
+    }
+
+    free(fftOutput);
+    free(magnitudeSpectrum);
+    free(melOutput);
+
+    return sample;
 }
 
 float hzToMel(float hz) {
