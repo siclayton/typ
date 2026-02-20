@@ -10,7 +10,7 @@ MicroBit uBit;
 arm_rfft_fast_instance_f32 fftInstance;
 
 int melBins[NUM_MEL_FILTERS + 2];
-float melWeights[NUM_MEL_FILTERS][FFT_SIZE/2];
+float melWeights[NUM_MEL_FILTERS][FFT_SIZE / 2];
 
 typedef struct {
     float features[NUM_MEL_FILTERS];
@@ -34,10 +34,14 @@ void applyMelFilters(float* fft, float* mel) {
     }
 }
 
+
+
 SpeechSample takeSample() {
 
     // Capture a seconds worth of audio
         // Will output the buf used in fft function call
+
+    uBit.audio.mic->getSample();
 
     // Calculate FFT and magnitude spectrum
     auto* fftOutput = static_cast<float *>(malloc(sizeof(float) * AUDIO_SAMPLES_NUMBER));
