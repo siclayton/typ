@@ -6,14 +6,11 @@
 #define NUM_SAMPLES 100
 #define K_VALUE 5
 #define FEATURE_COUNT 24
-#define TRUE 1
-#define FALSE 0
 
 MicroBit uBit;
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
-
-int training = TRUE;
+bool training = true;
 
 typedef struct {
     float features[FEATURE_COUNT];
@@ -294,7 +291,7 @@ GestureSample takeSample() {
 void onButtonA(MicroBitEvent e) {
     GestureSample accSample = takeSample();
 
-    if (training == TRUE) {
+    if (training) {
         TrainingSample sample = {currentClass, accSample};
         samples[currentSample++] = sample;
     } else {
