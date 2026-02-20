@@ -308,7 +308,7 @@ void onButtonB(MicroBitEvent e) {
 void onButtonAB(MicroBitEvent e) {
     model = KNN(FEATURE_COUNT, currentClass + 1, K_VALUE, currentSample, samples);
     uBit.serial.printf("Model trained\r\n");
-    training = FALSE;
+    training = false;
 }
 
 int main() {

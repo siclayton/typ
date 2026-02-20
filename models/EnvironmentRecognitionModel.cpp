@@ -3,13 +3,11 @@
 #define NUM_SAMPLES 20
 #define NUM_BINS 4
 #define FEATURE_COUNT 4
-#define TRUE 1
-#define FALSE 0
 
 MicroBit uBit;
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
-int training = TRUE;
+bool training = true;
 
 // A sample to predict
 typedef struct {
@@ -233,7 +231,7 @@ void onButtonA(MicroBitEvent e) {
 
     // If in training mode, label sample and add it to list of samples used to train the model
     // Otherwise, predict the class of the sample collected
-    if (training == TRUE) {
+    if (training) {
         TrainingSample sample = {currentClass, envSample};
         samples[currentSample++] = sample;
     } else {
@@ -252,7 +250,7 @@ void onButtonAB(MicroBitEvent e) {
     model = new NaiveBayesModel(4, currentClass + 1, currentSample, samples);
 
     uBit.serial.printf("Model trained\r\n");
-    training = FALSE;
+    training = false;
 }
 
 int main() {
