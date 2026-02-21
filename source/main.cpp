@@ -36,7 +36,7 @@ class DecisionTree {
         int predict(SpeechSample sample);
     private:
         typedef struct {
-            float gain;
+            float impurity;
             float threshold;
             int feature;
         } Split;
@@ -51,6 +51,8 @@ class DecisionTree {
 
         void trainModel();
         Split findBestSplit(int startIndex, int endIndex);
+        float calcGiniFromClassCounts(int* classCounts, int total);
+        float calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold);
         int reorderIndices(int startIndex, int endIndex, int feature, float threshold);
 };
 
@@ -135,7 +137,63 @@ DecisionTree::Split DecisionTree::findBestSplit(int startIndex, int endIndex) {
 
     return best;
 }
+/**
+ * Calculate gini impurity for one side of a split, based on given class counts
+ * @param classCounts an array of the counts for each class, of size int[numClasses]
+ * @param total the total number of samples on this side of the split
+ * @return the gini impurity of this side
+ */
+float DecisionTree::calcGiniFromClassCounts(int* classCounts, int total) {
+    if (total < 0) {
+        return 0;
+    }
 
+    float sum = 0;
+    for (int i = 0; i < numClasses; i++) {
+        float classProb = static_cast<float>(classCounts[i]) / total;
+        sum += classProb * classProb;
+    }
+
+    return 1 - sum;
+}
+/**
+ * Calculate gini impurity for a given split
+ * @param startIndex the first index of the indices array to consider
+ * @param endIndex the last index of the indices array to consider
+ * @param feature the feature to split on
+ * @param threshold the value to split the given feature on
+ * @return the weighted gini impurity of the split
+ */
+float DecisionTree::calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold) {
+    int leftClassCounts[numClasses];
+    int rightClassCounts[numClasses];
+    int numLeft = 0;
+    int numRight = 0;
+
+    for (int i = 0; i < numClasses; i++) {
+        leftClassCounts[i] = rightClassCounts[i] = 0;
+    }
+
+    // Count the number of samples in each class to the left and right of the threshold
+    for (int i = startIndex; i <= endIndex; i++) {
+        int label = xTrain[indices[i]].sampleClass;
+        float featureValue = xTrain[indices[i]].sample.features[feature];
+
+        if (featureValue < threshold) {
+            leftClassCounts[label]++;
+            numLeft++;
+        } else {
+            rightClassCounts[label]++;
+            numRight++;
+        }
+    }
+
+    float giniLeft = calcGiniFromClassCounts(leftClassCounts, numLeft);
+    float giniRight = calcGiniFromClassCounts(rightClassCounts, numRight);
+
+    float weightedGini = (numLeft * giniLeft + numRight * giniRight) / (numLeft + numRight);
+    return weightedGini;
+}
 /**
  * Reorders a part of the indices array so that all the indices whose corresponding sample has a feature value < threshold are on the left,
  * and samples with a feature value > threshold are on the right
