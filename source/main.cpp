@@ -54,6 +54,7 @@ class DecisionTree {
         float calcGiniFromClassCounts(int* classCounts, int total);
         float calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold);
         int reorderIndices(int startIndex, int endIndex, int feature, float threshold);
+        int findMajorityClass(int startIndex, int endIndex);
 };
 
 DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]) {
@@ -88,21 +89,20 @@ void DecisionTree::trainModel() {
         TreeNode &current = nodes[currentIndex];
 
         // Stopping conditions
-        // TODO: Add any other stopping conditions (e.g. min num samples or if node is pure)
-        if (current.depth >= MAX_DEPTH) {
+        if (current.depth >= MAX_DEPTH || current.end - current.start < 5) {
             current.isLeaf = true;
-            // TODO: Calculate the prediction for this node
-            // current.prediction = majority class of samples it considers
+            current.prediction = findMajorityClass(current.start, current.end);
             continue;
         }
 
         Split bestSplit = findBestSplit(current.start, current.end);
 
-        // TODO: Check split usefulness stopping condition
-        // If split gain <=0:
-        // node.isLeaf = true
-        // node.prediction = majority class of samples it considers
-        // continue
+        // Stop splitting as this node is pure (all samples in the data it considers are the same class)
+        if (bestSplit.impurity <= 0) {
+            current.isLeaf = true;
+            current.prediction = findMajorityClass(current.start, current.end);
+            continue;
+        }
 
         // Reorder indices array and find the index at which the values are split
         int midIndex = reorderIndices(current.start, current.end, bestSplit.feature, bestSplit.value);
@@ -111,7 +111,7 @@ void DecisionTree::trainModel() {
         current.feature = bestSplit.feature;
         current.threshold = bestSplit.value;
 
-        // Create the children for this node
+        // Create the children for this node and add them to the queue
         int left = numNodes++;
         int right = numNodes++;
         current.left = left;
@@ -122,6 +122,32 @@ void DecisionTree::trainModel() {
         queue[end++] = left;
         queue[end++] = right;
     }
+}
+/**
+ * Find the majority class for a given part of the dataset
+ * @param startIndex the first index in the indices array to consider
+ * @param endIndex the last index in the indices array to consider
+ * @return the majority class
+ */
+int DecisionTree::findMajorityClass(int startIndex, int endIndex) {
+    int highestClassCount = 0;
+    int majorityClass = 0;
+
+    for (int i = 0; i < numClasses; i++) {
+        int count = 0;
+        for (int j = startIndex; j <= endIndex; j++) {
+            if (xTrain[indices[j]].sampleClass == i) {
+                count++;
+            }
+        }
+
+        if (count > highestClassCount) {
+            highestClassCount = count;
+            majorityClass = i;
+        }
+    }
+
+    return majorityClass;
 }
 /**
  * Find the best feature, value pair to split the data on to reduce the Gini impurity
