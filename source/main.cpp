@@ -35,15 +35,23 @@ class DecisionTree {
         DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]);
         int predict(SpeechSample sample);
     private:
+        typedef struct {
+            float gain;
+            float threshold;
+            int feature;
+        } Split;
+
         int numFeatures{};
         int numClasses{};
         int lenXTrain{};
         int numNodes{};
         TrainingSample* xTrain{};
-        TreeNode* nodes{};
+        TreeNode nodes[MAX_NODES]{};
         int* indices{};
 
         void trainModel();
+        Split findBestSplit(int startIndex, int endIndex);
+        int reorderIndices(int startIndex, int endIndex, int feature, float threshold);
 };
 
 DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]) {
@@ -53,8 +61,10 @@ DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, Train
     this->xTrain = xTrain;
 
     this->numNodes = 0;
-    this->nodes = new TreeNode[MAX_NODES];
     this->indices = new int[lenXTrain];
+    for (int i = 0; i < lenXTrain; i++) {
+        indices[i] = i;
+    }
 
     trainModel();
 }
@@ -93,6 +103,9 @@ void DecisionTree::trainModel() {
         // node.prediction = majority class of samples it considers
         // continue
 
+        // TODO: Reorder indices based on best split found
+        // reorderIndices(current.start, current.end, split.feature, split.threshold);
+
         // node.feature = best feature found in findBestSplit()
         // node.threshold = best threshold found in findBestSplit()
 
@@ -104,10 +117,51 @@ void DecisionTree::trainModel() {
 
         // midIndex is the index of the indices array where for this nodes split, everything to the left < threshold, everything to the right >= threshold
         // nodes[left] = {current.start, midIndex, -1, -1, -1, -1, current.depth + 1, false, -1};
+        // nodes[right] = {midIndex + 1, current.end, -1, -1, -1, -1, current.depth + 1, false, -1}
 
         queue[end++] = left;
         queue[end++] = right;
     }
+}
+
+DecisionTree::Split DecisionTree::findBestSplit(int startIndex, int endIndex) {
+    Split best = {0, 0, 0};
+
+    // Loop through the features
+        // Loop through the values
+            // Calculate gini impurity
+            // If this impurity is less than the best impurity
+                // This is the new best split
+
+    return best;
+}
+
+/**
+ * Reorders a part of the indices array so that all the indices whose corresponding sample has a feature value < threshold are on the left,
+ * and samples with a feature value > threshold are on the right
+ *
+ * @param startIndex the first index to consider
+ * @param endIndex the last index to consider
+ * @param feature the feature whose value we are interested in (as an index of the features array in a SpeechSample struct)
+ * @param threshold the threshold value to compare feature values to
+ * @return the index of the last index in the indices array whose corresponding sample in xTrain has a feature value < threshold
+ */
+int DecisionTree::reorderIndices(int startIndex, int endIndex, int feature, float threshold) {
+    // Index of the first index in the indices array, whose corresponding sample in xTrain has a feature value >= threshold
+    int greaterThan = startIndex;
+
+    for (int i = startIndex; i <= endIndex; i ++) {
+        TrainingSample &trainingSample = xTrain[indices[i]];
+
+        if (trainingSample.sample.features[feature] < threshold) {
+            int temp = indices[i];
+            indices[i] = indices[greaterThan];
+            indices[greaterThan++] = temp;
+        }
+    }
+
+    // Return the index of the last item < threshold
+    return greaterThan - 1;
 }
 
 // Global variables
@@ -159,6 +213,7 @@ SpeechSample takeSample() {
     auto m2s = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
 
     while (system_timer_current_time() - start < 1000) {
+        // Pull a sample from the StreamNormaliser for the mic
         ManagedBuffer buf = source.pull();
         uint8_t* bytes = buf.getBytes();
 
@@ -166,6 +221,7 @@ SpeechSample takeSample() {
         auto samples = reinterpret_cast<int16_t*>(bytes);
         int numSamples = buf.length() / 2;
 
+        // Store samples in a window until we have enough to perform a fft
         for (int i = 0; i < numSamples; i++) {
             window[windowIndex++] = samples[i]  * (1.0f / 32768.0f); // Normalises the data to floats in the range (-1, 1)
 
@@ -174,6 +230,7 @@ SpeechSample takeSample() {
                 windowIndex = 0;
                 count++;
 
+                // Calculate mean and m2 (used in variance calculation) to allow aggregation of the melOutput for different windows
                 for (int j = 0; j < NUM_MEL; j++) {
                     float diff = melOutput[j] - means[j];
 
@@ -190,7 +247,7 @@ SpeechSample takeSample() {
         variances[i] = m2s[i] / count;
     }
 
-    // Pack feature vector returned by mel filter bank calculations into a SpeechSample
+    // Pack aggregated melOutputs into a SpeechSample
     SpeechSample sample;
     for (int i = 0; i < NUM_MEL; i++) {
         sample.features[i] = means[i];
@@ -220,7 +277,7 @@ void computeMelFilterbank() {
     float step = (high - low) / NUM_MEL + 1;
 
     // Calculate what mel values go into each fft bin
-    // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points (
+    // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points
     for (int i = 0; i < NUM_MEL + 2; i++) {
         float hz = melToHz(low + i * step);
 
@@ -256,8 +313,14 @@ void onButtonA(MicroBitEvent e){
         uBit.display.print(prediction);
     }
 }
-void onButtonB(MicroBitEvent e);
-void onButtonAB(MicroBitEvent e);
+void onButtonB(MicroBitEvent e) {
+    currentClass++;
+}
+void onButtonAB(MicroBitEvent e) {
+    model = DecisionTree(NUM_FEATURES, currentClass + 1, currentSample, samples);
+    uBit.serial.printf("Model trained\r\n");
+    training = false;
+}
 
 int main() {
     uBit.init();
