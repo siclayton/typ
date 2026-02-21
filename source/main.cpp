@@ -37,7 +37,7 @@ class DecisionTree {
     private:
         typedef struct {
             float impurity;
-            float threshold;
+            float value;
             int feature;
         } Split;
 
@@ -96,8 +96,7 @@ void DecisionTree::trainModel() {
             continue;
         }
 
-        // TODO: Calculate the feature and threshold for that node
-        // findBestSplit();
+        Split bestSplit = findBestSplit(current.start, current.end);
 
         // TODO: Check split usefulness stopping condition
         // If split gain <=0:
@@ -105,35 +104,46 @@ void DecisionTree::trainModel() {
         // node.prediction = majority class of samples it considers
         // continue
 
-        // TODO: Reorder indices based on best split found
-        // reorderIndices(current.start, current.end, split.feature, split.threshold);
+        // Reorder indices array and find the index at which the values are split
+        int midIndex = reorderIndices(current.start, current.end, bestSplit.feature, bestSplit.value);
 
-        // node.feature = best feature found in findBestSplit()
-        // node.threshold = best threshold found in findBestSplit()
+        // Store the feature, value pair for the split at this node
+        current.feature = bestSplit.feature;
+        current.threshold = bestSplit.value;
 
+        // Create the children for this node
         int left = numNodes++;
         int right = numNodes++;
-
         current.left = left;
         current.right = right;
-
-        // midIndex is the index of the indices array where for this nodes split, everything to the left < threshold, everything to the right >= threshold
-        // nodes[left] = {current.start, midIndex, -1, -1, -1, -1, current.depth + 1, false, -1};
-        // nodes[right] = {midIndex + 1, current.end, -1, -1, -1, -1, current.depth + 1, false, -1}
+        nodes[left] = {current.start, midIndex, -1, -1, -1, -1, current.depth + 1, false, -1};
+        nodes[right] = {midIndex + 1, current.end, -1, -1, -1, -1, current.depth + 1, false, -1};
 
         queue[end++] = left;
         queue[end++] = right;
     }
 }
-
+/**
+ * Find the best feature, value pair to split the data on to reduce the Gini impurity
+ * @param startIndex the first index in the indices array to consider
+ * @param endIndex the last index of the indices array to consider
+ * @return a Split object containing {impurity, value, feature} of the best split found
+ */
 DecisionTree::Split DecisionTree::findBestSplit(int startIndex, int endIndex) {
     Split best = {0, 0, 0};
 
-    // Loop through the features
-        // Loop through the values
-            // Calculate gini impurity
-            // If this impurity is less than the best impurity
-                // This is the new best split
+    // Brute-force each feature,value pair to find the one with the lowest impurity
+    for (int i = 0; i < numFeatures; i++) {
+        for (int j = startIndex; j < endIndex; j++) {
+            float value = xTrain[indices[j]].sample.features[i];
+
+            float splitGini = calcGiniImpurity(startIndex, endIndex, i, value);
+
+            if (splitGini < best.impurity) {
+                best = {splitGini, value, i};
+            }
+        }
+    }
 
     return best;
 }
