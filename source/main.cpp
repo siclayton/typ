@@ -1,5 +1,8 @@
 #include "MicroBit.h"
+#define ARM_MATH_CM4
 #include "arm_math.h"
+
+#include <cstdio>
 
 #define SAMPLE_RATE (11 * 1024)
 #define FFT_SIZE 512
@@ -7,7 +10,8 @@
 #define NUM_FEATURES (NUM_MEL * 2)
 
 #define NUM_SAMPLES 150
-#define MAX_DEPTH 5
+#define MAX_DEPTH 6
+#define MIN_SAMPLES_TO_SPLIT 5
 #define MAX_NODES (((MAX_DEPTH + 1) * (MAX_DEPTH + 1)) - 1)
 
 typedef struct {
@@ -33,7 +37,7 @@ class DecisionTree {
     public:
         DecisionTree() = default;
         DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]);
-        int predict(SpeechSample sample);
+        //int predict(SpeechSample sample);
     private:
         typedef struct {
             float impurity;
@@ -82,14 +86,14 @@ void DecisionTree::trainModel() {
     nodes[numNodes++] = {0, lenXTrain - 1, -1, -1, -1, -1, 0, false, -1};
     queue[end++] = 0;
 
-    // Use the CART algorithm to populate the nodes array
+    // Use the CART algorithm to create the tree
     // Loop while there are still nodes left in the queue
     while (start < end) {
         int currentIndex = queue[start++];
         TreeNode &current = nodes[currentIndex];
 
-        // Stopping conditions
-        if (current.depth >= MAX_DEPTH || current.end - current.start < 5) {
+        // Stopping conditions to prevent overfitting
+        if (current.depth >= MAX_DEPTH || current.end - current.start < MIN_SAMPLES_TO_SPLIT) {
             current.isLeaf = true;
             current.prediction = findMajorityClass(current.start, current.end);
             continue;
@@ -346,13 +350,33 @@ SpeechSample takeSample() {
     for (int i = 0; i < NUM_MEL; i++) {
         sample.features[i] = means[i];
     }
-    for (int i = NUM_MEL; i < NUM_FEATURES; i++) {
-        sample.features[i] = variances[i];
+    for (int i = 0; i < NUM_MEL; i++) {
+        sample.features[NUM_MEL + i] = variances[i];
     }
 
     free(means);
     free(m2s);
     free(variances);
+
+    //Print the sample for debugging
+    //Build the line to print in a buffer and print once (to put everything on one line in the output)
+    char buf[128];
+    int offset = 0;
+
+    for (int i = 0; i < NUM_FEATURES; i++) {
+        int value = static_cast<int>(sample.features[i] * 1000);
+        offset += snprintf(
+            buf + offset,
+            sizeof(buf) - offset,
+            "%d%s",
+            value,
+            i < NUM_FEATURES - 1 ? "," : ""
+        );
+    }
+
+    DMESG("%s", buf);
+
+    return sample;
 
     return sample;
 }
@@ -402,9 +426,9 @@ void onButtonA(MicroBitEvent e){
         TrainingSample sample = {currentClass, speechSample};
         samples[currentSample++] = sample;
     } else {
-        int prediction = model.predict(speechSample);
-        uBit.serial.printf("Prediction %d\r\n", prediction);
-        uBit.display.print(prediction);
+        //int prediction = model.predict(speechSample);
+        // uBit.serial.printf("Prediction %d\r\n", prediction);
+        // uBit.display.print(prediction);
     }
 }
 void onButtonB(MicroBitEvent e) {
