@@ -5,7 +5,7 @@
 #include <cstdio>
 
 #define SAMPLE_RATE (11 * 1024)
-#define FFT_SIZE 512
+#define FFT_SIZE 256
 #define NUM_MEL 10
 #define NUM_FEATURES (NUM_MEL * 2)
 
@@ -265,7 +265,7 @@ int DecisionTree::reorderIndices(int startIndex, int endIndex, int feature, floa
 // Global variables
 MicroBit uBit;
 arm_rfft_fast_instance_f32 fftInstance;
-DataSource& source = *uBit.audio.processor;
+DataSource& source = *uBit.audio.rawSplitter;
 DecisionTree model;
 
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
@@ -289,7 +289,7 @@ void applyMelFilters(float* fft, float* mel) {
         for (int j = melBins[i]; j < melBins[i + 2]; j++) {
             sum += fft[j] * melWeights[i][j];
         }
-        mel[i] = logf(sum);
+        mel[i] = sum;
     }
 }
 
@@ -307,8 +307,8 @@ SpeechSample takeSample() {
     int count = 0;
     uint64_t start = system_timer_current_time();
 
-    auto means = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
-    auto m2s = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
+    float means[NUM_MEL] = {0};
+    float m2s[NUM_MEL] = {0};
 
     while (system_timer_current_time() - start < 1000) {
         // Pull a sample from the StreamNormaliser for the mic
@@ -318,6 +318,21 @@ SpeechSample takeSample() {
         // Get the data back into 16 bit format
         auto samples = reinterpret_cast<int16_t*>(bytes);
         int numSamples = buf.length() / 2;
+
+        char buffer[128];
+        int offset = 0;
+
+        for (int i = 0; i < numSamples; i++) {
+            offset += snprintf(
+                buffer + offset,
+                sizeof(buffer) - offset,
+                "%d%s",
+                samples[i],
+                i < numSamples - 1 ? "," : ""
+            );
+        }
+
+        DMESG("%s", buffer);
 
         // Store samples in a window until we have enough to perform a fft
         for (int i = 0; i < numSamples; i++) {
@@ -340,7 +355,7 @@ SpeechSample takeSample() {
     }
 
     count--;
-    auto variances = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
+    float variances[NUM_MEL] = {0};
     for (int i = 0; i < NUM_MEL; i++) {
         variances[i] = m2s[i] / count;
     }
@@ -348,15 +363,11 @@ SpeechSample takeSample() {
     // Pack aggregated melOutputs into a SpeechSample
     SpeechSample sample;
     for (int i = 0; i < NUM_MEL; i++) {
-        sample.features[i] = means[i];
+        sample.features[i] = log10f(means[i] + 1e-6f);
     }
     for (int i = 0; i < NUM_MEL; i++) {
         sample.features[NUM_MEL + i] = variances[i];
     }
-
-    free(means);
-    free(m2s);
-    free(variances);
 
     //Print the sample for debugging
     //Build the line to print in a buffer and print once (to put everything on one line in the output)
@@ -390,9 +401,12 @@ float melToHz(float mel) {
 }
 
 void computeMelFilterbank() {
+    // Initialise all weights to 0
+    memset(melWeights, 0, sizeof(melWeights));
+
     float low = hzToMel(0);
     float high = hzToMel(SAMPLE_RATE / 2);
-    float step = (high - low) / NUM_MEL + 1;
+    float step = (high - low) / (NUM_MEL + 1);
 
     // Calculate what mel values go into each fft bin
     // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points
