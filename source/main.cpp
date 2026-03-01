@@ -262,10 +262,39 @@ int DecisionTree::reorderIndices(int startIndex, int endIndex, int feature, floa
     return greaterThan - 1;
 }
 
+class MicSink : public DataSink {
+    public:
+        MicSink(DataSource &source);
+        int pullRequest() override;
+        ManagedBuffer getBuffer();
+    private:
+        DataSource &upstream;
+        ManagedBuffer buffer;
+};
+
+MicSink::MicSink(DataSource &source) : upstream(source) {
+    upstream.connect(*this);
+    buffer = ManagedBuffer();
+}
+
+int MicSink::pullRequest() {
+    buffer = upstream.pull();
+
+    if (buffer.length() == 0) {
+        return DEVICE_NO_DATA;
+    }
+
+    return DEVICE_OK;
+}
+
+ManagedBuffer MicSink::getBuffer() {
+    return buffer;
+}
+
 // Global variables
 MicroBit uBit;
 arm_rfft_fast_instance_f32 fftInstance;
-DataSource& source = *uBit.audio.rawSplitter;
+auto sink = MicSink( *uBit.audio.rawSplitter->createChannel());
 DecisionTree model;
 
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
@@ -311,12 +340,18 @@ SpeechSample takeSample() {
     float m2s[NUM_MEL] = {0};
 
     while (system_timer_current_time() - start < 1000) {
-        // Pull a sample from the StreamNormaliser for the mic
-        ManagedBuffer buf = source.pull();
+        // Pull a sample from the mic
+        int resp = sink.pullRequest();
+
+        if (resp != DEVICE_OK) {
+            continue;
+        }
+
+        ManagedBuffer buf = sink.getBuffer();
         uint8_t* bytes = buf.getBytes();
 
         // Get the data back into 16 bit format
-        auto samples = reinterpret_cast<int16_t*>(bytes);
+        auto micSamples = reinterpret_cast<int16_t*>(bytes);
         int numSamples = buf.length() / 2;
 
         char buffer[128];
@@ -327,7 +362,7 @@ SpeechSample takeSample() {
                 buffer + offset,
                 sizeof(buffer) - offset,
                 "%d%s",
-                samples[i],
+                micSamples[i],
                 i < numSamples - 1 ? "," : ""
             );
         }
@@ -336,7 +371,7 @@ SpeechSample takeSample() {
 
         // Store samples in a window until we have enough to perform a fft
         for (int i = 0; i < numSamples; i++) {
-            window[windowIndex++] = samples[i]  * (1.0f / 32768.0f); // Normalises the data to floats in the range (-1, 1)
+            window[windowIndex++] = micSamples[i]  * (1.0f / 32768.0f); // Normalises the data to floats in the range (-1, 1)
 
             if (windowIndex == FFT_SIZE) {
                 applyfftAndMel();
