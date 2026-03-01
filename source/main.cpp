@@ -24,6 +24,9 @@ typedef struct {
     int prediction; // The class this node predicts (only for leaf nodes)
 } TreeNode;
 
+/**
+ * A struct which represents a 1-second sample taken from the microphone
+ */
 typedef struct {
     float features[NUM_FEATURES];
 } SpeechSample;
@@ -37,7 +40,7 @@ class DecisionTree {
     public:
         DecisionTree() = default;
         DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]);
-        //int predict(SpeechSample sample);
+        int predict(SpeechSample sample);
     private:
         typedef struct {
             float impurity;
@@ -261,6 +264,25 @@ int DecisionTree::reorderIndices(int startIndex, int endIndex, int feature, floa
     // Return the index of the last item < threshold
     return greaterThan - 1;
 }
+/**
+ * Predict the class of the given sample
+ *
+ * @param sample the sample to predict the class of
+ * @return the predicted class
+ */
+int DecisionTree::predict(SpeechSample sample) {
+    TreeNode current = nodes[0]; // Start traversal at the root node
+
+    while (!current.isLeaf) {
+        if (sample.features[current.feature] < current.threshold) {
+            current = nodes[current.left];
+        } else {
+            current = nodes[current.right];
+        }
+    }
+
+    return current.prediction;
+}
 
 class MicSink : public DataSink {
     public:
@@ -421,8 +443,6 @@ SpeechSample takeSample() {
     }
 
     DMESG("%s", buf);
-
-    return sample;
 
     return sample;
 }
