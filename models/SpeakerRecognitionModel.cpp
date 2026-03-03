@@ -1,13 +1,17 @@
 #include "MicroBit.h"
+#define ARM_MATH_CM4
 #include "arm_math.h"
 
+#include <cstdio>
+
 #define SAMPLE_RATE (11 * 1024)
-#define FFT_SIZE 512
+#define FFT_SIZE 256
 #define NUM_MEL 10
 #define NUM_FEATURES (NUM_MEL * 2)
 
 #define NUM_SAMPLES 150
-#define MAX_DEPTH 5
+#define MAX_DEPTH 6
+#define MIN_SAMPLES_TO_SPLIT 5
 #define MAX_NODES (((MAX_DEPTH + 1) * (MAX_DEPTH + 1)) - 1)
 
 typedef struct {
@@ -20,6 +24,9 @@ typedef struct {
     int prediction; // The class this node predicts (only for leaf nodes)
 } TreeNode;
 
+/**
+ * A struct which represents a 1-second sample taken from the microphone
+ */
 typedef struct {
     float features[NUM_FEATURES];
 } SpeechSample;
@@ -35,15 +42,26 @@ class DecisionTree {
         DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]);
         int predict(SpeechSample sample);
     private:
+        typedef struct {
+            float impurity;
+            float value;
+            int feature;
+        } Split;
+
         int numFeatures{};
         int numClasses{};
         int lenXTrain{};
         int numNodes{};
         TrainingSample* xTrain{};
-        TreeNode* nodes{};
+        TreeNode nodes[MAX_NODES]{};
         int* indices{};
 
         void trainModel();
+        Split findBestSplit(int startIndex, int endIndex);
+        float calcGiniFromClassCounts(int* classCounts, int total);
+        float calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold);
+        int reorderIndices(int startIndex, int endIndex, int feature, float threshold);
+        int findMajorityClass(int startIndex, int endIndex);
 };
 
 DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]) {
@@ -53,8 +71,10 @@ DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, Train
     this->xTrain = xTrain;
 
     this->numNodes = 0;
-    this->nodes = new TreeNode[MAX_NODES];
     this->indices = new int[lenXTrain];
+    for (int i = 0; i < lenXTrain; i++) {
+        indices[i] = i;
+    }
 
     trainModel();
 }
@@ -69,51 +89,234 @@ void DecisionTree::trainModel() {
     nodes[numNodes++] = {0, lenXTrain - 1, -1, -1, -1, -1, 0, false, -1};
     queue[end++] = 0;
 
-    // Use the CART algorithm to populate the nodes array
+    // Use the CART algorithm to create the tree
     // Loop while there are still nodes left in the queue
     while (start < end) {
         int currentIndex = queue[start++];
         TreeNode &current = nodes[currentIndex];
 
-        // Stopping conditions
-        // TODO: Add any other stopping conditions (e.g. min num samples or if node is pure)
-        if (current.depth >= MAX_DEPTH) {
+        // Stopping conditions to prevent overfitting
+        if (current.depth >= MAX_DEPTH || current.end - current.start < MIN_SAMPLES_TO_SPLIT) {
             current.isLeaf = true;
-            // TODO: Calculate the prediction for this node
-            // current.prediction = majority class of samples it considers
+            current.prediction = findMajorityClass(current.start, current.end);
             continue;
         }
 
-        // TODO: Calculate the feature and threshold for that node
-        // findBestSplit();
+        Split bestSplit = findBestSplit(current.start, current.end);
 
-        // TODO: Check split usefulness stopping condition
-        // If split gain <=0:
-        // node.isLeaf = true
-        // node.prediction = majority class of samples it considers
-        // continue
+        // Stop splitting as this node is pure (all samples in the data it considers are the same class)
+        if (bestSplit.impurity <= 0) {
+            current.isLeaf = true;
+            current.prediction = findMajorityClass(current.start, current.end);
+            continue;
+        }
 
-        // node.feature = best feature found in findBestSplit()
-        // node.threshold = best threshold found in findBestSplit()
+        // Reorder indices array and find the index at which the values are split
+        int midIndex = reorderIndices(current.start, current.end, bestSplit.feature, bestSplit.value);
 
+        // Store the feature, value pair for the split at this node
+        current.feature = bestSplit.feature;
+        current.threshold = bestSplit.value;
+
+        // Create the children for this node and add them to the queue
         int left = numNodes++;
         int right = numNodes++;
-
         current.left = left;
         current.right = right;
-
-        // midIndex is the index of the indices array where for this nodes split, everything to the left < threshold, everything to the right >= threshold
-        // nodes[left] = {current.start, midIndex, -1, -1, -1, -1, current.depth + 1, false, -1};
+        nodes[left] = {current.start, midIndex, -1, -1, -1, -1, current.depth + 1, false, -1};
+        nodes[right] = {midIndex + 1, current.end, -1, -1, -1, -1, current.depth + 1, false, -1};
 
         queue[end++] = left;
         queue[end++] = right;
     }
 }
+/**
+ * Find the majority class for a given part of the dataset
+ * @param startIndex the first index in the indices array to consider
+ * @param endIndex the last index in the indices array to consider
+ * @return the majority class
+ */
+int DecisionTree::findMajorityClass(int startIndex, int endIndex) {
+    int highestClassCount = 0;
+    int majorityClass = 0;
+
+    for (int i = 0; i < numClasses; i++) {
+        int count = 0;
+        for (int j = startIndex; j <= endIndex; j++) {
+            if (xTrain[indices[j]].sampleClass == i) {
+                count++;
+            }
+        }
+
+        if (count > highestClassCount) {
+            highestClassCount = count;
+            majorityClass = i;
+        }
+    }
+
+    return majorityClass;
+}
+/**
+ * Find the best feature, value pair to split the data on to reduce the Gini impurity
+ * @param startIndex the first index in the indices array to consider
+ * @param endIndex the last index of the indices array to consider
+ * @return a Split object containing {impurity, value, feature} of the best split found
+ */
+DecisionTree::Split DecisionTree::findBestSplit(int startIndex, int endIndex) {
+    Split best = {0, 0, 0};
+
+    // Brute-force each feature,value pair to find the one with the lowest impurity
+    for (int i = 0; i < numFeatures; i++) {
+        for (int j = startIndex; j < endIndex; j++) {
+            float value = xTrain[indices[j]].sample.features[i];
+
+            float splitGini = calcGiniImpurity(startIndex, endIndex, i, value);
+
+            if (splitGini < best.impurity) {
+                best = {splitGini, value, i};
+            }
+        }
+    }
+
+    return best;
+}
+/**
+ * Calculate gini impurity for one side of a split, based on given class counts
+ * @param classCounts an array of the counts for each class, of size int[numClasses]
+ * @param total the total number of samples on this side of the split
+ * @return the gini impurity of this side
+ */
+float DecisionTree::calcGiniFromClassCounts(int* classCounts, int total) {
+    if (total < 0) {
+        return 0;
+    }
+
+    float sum = 0;
+    for (int i = 0; i < numClasses; i++) {
+        float classProb = static_cast<float>(classCounts[i]) / total;
+        sum += classProb * classProb;
+    }
+
+    return 1 - sum;
+}
+/**
+ * Calculate gini impurity for a given split
+ * @param startIndex the first index of the indices array to consider
+ * @param endIndex the last index of the indices array to consider
+ * @param feature the feature to split on
+ * @param threshold the value to split the given feature on
+ * @return the weighted gini impurity of the split
+ */
+float DecisionTree::calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold) {
+    int leftClassCounts[numClasses];
+    int rightClassCounts[numClasses];
+    int numLeft = 0;
+    int numRight = 0;
+
+    for (int i = 0; i < numClasses; i++) {
+        leftClassCounts[i] = rightClassCounts[i] = 0;
+    }
+
+    // Count the number of samples in each class to the left and right of the threshold
+    for (int i = startIndex; i <= endIndex; i++) {
+        int label = xTrain[indices[i]].sampleClass;
+        float featureValue = xTrain[indices[i]].sample.features[feature];
+
+        if (featureValue < threshold) {
+            leftClassCounts[label]++;
+            numLeft++;
+        } else {
+            rightClassCounts[label]++;
+            numRight++;
+        }
+    }
+
+    float giniLeft = calcGiniFromClassCounts(leftClassCounts, numLeft);
+    float giniRight = calcGiniFromClassCounts(rightClassCounts, numRight);
+
+    float weightedGini = (numLeft * giniLeft + numRight * giniRight) / (numLeft + numRight);
+    return weightedGini;
+}
+/**
+ * Reorders a part of the indices array so that all the indices whose corresponding sample has a feature value < threshold are on the left,
+ * and samples with a feature value > threshold are on the right
+ *
+ * @param startIndex the first index to consider
+ * @param endIndex the last index to consider
+ * @param feature the feature whose value we are interested in (as an index of the features array in a SpeechSample struct)
+ * @param threshold the threshold value to compare feature values to
+ * @return the index of the last index in the indices array whose corresponding sample in xTrain has a feature value < threshold
+ */
+int DecisionTree::reorderIndices(int startIndex, int endIndex, int feature, float threshold) {
+    // Index of the first index in the indices array, whose corresponding sample in xTrain has a feature value >= threshold
+    int greaterThan = startIndex;
+
+    for (int i = startIndex; i <= endIndex; i ++) {
+        TrainingSample &trainingSample = xTrain[indices[i]];
+
+        if (trainingSample.sample.features[feature] < threshold) {
+            int temp = indices[i];
+            indices[i] = indices[greaterThan];
+            indices[greaterThan++] = temp;
+        }
+    }
+
+    // Return the index of the last item < threshold
+    return greaterThan - 1;
+}
+/**
+ * Predict the class of the given sample
+ *
+ * @param sample the sample to predict the class of
+ * @return the predicted class
+ */
+int DecisionTree::predict(SpeechSample sample) {
+    TreeNode current = nodes[0]; // Start traversal at the root node
+
+    while (!current.isLeaf) {
+        if (sample.features[current.feature] < current.threshold) {
+            current = nodes[current.left];
+        } else {
+            current = nodes[current.right];
+        }
+    }
+
+    return current.prediction;
+}
+
+class MicSink : public DataSink {
+    public:
+        MicSink(DataSource &source);
+        int pullRequest() override;
+        ManagedBuffer getBuffer();
+    private:
+        DataSource &upstream;
+        ManagedBuffer buffer;
+};
+
+MicSink::MicSink(DataSource &source) : upstream(source) {
+    upstream.connect(*this);
+    buffer = ManagedBuffer();
+}
+
+int MicSink::pullRequest() {
+    buffer = upstream.pull();
+
+    if (buffer.length() == 0) {
+        return DEVICE_NO_DATA;
+    }
+
+    return DEVICE_OK;
+}
+
+ManagedBuffer MicSink::getBuffer() {
+    return buffer;
+}
 
 // Global variables
 MicroBit uBit;
 arm_rfft_fast_instance_f32 fftInstance;
-DataSource& source = *uBit.audio.processor;
+auto sink = MicSink( *uBit.audio.rawSplitter->createChannel());
 DecisionTree model;
 
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
@@ -137,7 +340,7 @@ void applyMelFilters(float* fft, float* mel) {
         for (int j = melBins[i]; j < melBins[i + 2]; j++) {
             sum += fft[j] * melWeights[i][j];
         }
-        mel[i] = logf(sum);
+        mel[i] = sum;
     }
 }
 
@@ -155,25 +358,49 @@ SpeechSample takeSample() {
     int count = 0;
     uint64_t start = system_timer_current_time();
 
-    auto means = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
-    auto m2s = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
+    float means[NUM_MEL] = {0};
+    float m2s[NUM_MEL] = {0};
 
     while (system_timer_current_time() - start < 1000) {
-        ManagedBuffer buf = source.pull();
+        // Pull a sample from the mic
+        int resp = sink.pullRequest();
+
+        if (resp != DEVICE_OK) {
+            continue;
+        }
+
+        ManagedBuffer buf = sink.getBuffer();
         uint8_t* bytes = buf.getBytes();
 
         // Get the data back into 16 bit format
-        auto samples = reinterpret_cast<int16_t*>(bytes);
+        auto micSamples = reinterpret_cast<int16_t*>(bytes);
         int numSamples = buf.length() / 2;
 
+        char buffer[128];
+        int offset = 0;
+
         for (int i = 0; i < numSamples; i++) {
-            window[windowIndex++] = samples[i]  * (1.0f / 32768.0f); // Normalises the data to floats in the range (-1, 1)
+            offset += snprintf(
+                buffer + offset,
+                sizeof(buffer) - offset,
+                "%d%s",
+                micSamples[i],
+                i < numSamples - 1 ? "," : ""
+            );
+        }
+
+        DMESG("%s", buffer);
+
+        // Store samples in a window until we have enough to perform a fft
+        for (int i = 0; i < numSamples; i++) {
+            window[windowIndex++] = micSamples[i]  * (1.0f / 32768.0f); // Normalises the data to floats in the range (-1, 1)
 
             if (windowIndex == FFT_SIZE) {
                 applyfftAndMel();
                 windowIndex = 0;
                 count++;
 
+                // Calculate mean and m2 (used in variance calculation) to allow aggregation of the melOutput for different windows
                 for (int j = 0; j < NUM_MEL; j++) {
                     float diff = melOutput[j] - means[j];
 
@@ -185,23 +412,37 @@ SpeechSample takeSample() {
     }
 
     count--;
-    auto variances = static_cast<float *>(calloc(NUM_MEL, sizeof(float)));
+    float variances[NUM_MEL] = {0};
     for (int i = 0; i < NUM_MEL; i++) {
         variances[i] = m2s[i] / count;
     }
 
-    // Pack feature vector returned by mel filter bank calculations into a SpeechSample
+    // Pack aggregated melOutputs into a SpeechSample
     SpeechSample sample;
     for (int i = 0; i < NUM_MEL; i++) {
-        sample.features[i] = means[i];
+        sample.features[i] = log10f(means[i] + 1e-6f);
     }
-    for (int i = NUM_MEL; i < NUM_FEATURES; i++) {
-        sample.features[i] = variances[i];
+    for (int i = 0; i < NUM_MEL; i++) {
+        sample.features[NUM_MEL + i] = variances[i];
     }
 
-    free(means);
-    free(m2s);
-    free(variances);
+    //Print the sample for debugging
+    //Build the line to print in a buffer and print once (to put everything on one line in the output)
+    char buf[128];
+    int offset = 0;
+
+    for (int i = 0; i < NUM_FEATURES; i++) {
+        int value = static_cast<int>(sample.features[i] * 1000);
+        offset += snprintf(
+            buf + offset,
+            sizeof(buf) - offset,
+            "%d%s",
+            value,
+            i < NUM_FEATURES - 1 ? "," : ""
+        );
+    }
+
+    DMESG("%s", buf);
 
     return sample;
 }
@@ -215,12 +456,15 @@ float melToHz(float mel) {
 }
 
 void computeMelFilterbank() {
+    // Initialise all weights to 0
+    memset(melWeights, 0, sizeof(melWeights));
+
     float low = hzToMel(0);
     float high = hzToMel(SAMPLE_RATE / 2);
-    float step = (high - low) / NUM_MEL + 1;
+    float step = (high - low) / (NUM_MEL + 1);
 
     // Calculate what mel values go into each fft bin
-    // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points (
+    // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points
     for (int i = 0; i < NUM_MEL + 2; i++) {
         float hz = melToHz(low + i * step);
 
@@ -251,13 +495,19 @@ void onButtonA(MicroBitEvent e){
         TrainingSample sample = {currentClass, speechSample};
         samples[currentSample++] = sample;
     } else {
-        int prediction = model.predict(speechSample);
-        uBit.serial.printf("Prediction %d\r\n", prediction);
-        uBit.display.print(prediction);
+        //int prediction = model.predict(speechSample);
+        // uBit.serial.printf("Prediction %d\r\n", prediction);
+        // uBit.display.print(prediction);
     }
 }
-void onButtonB(MicroBitEvent e);
-void onButtonAB(MicroBitEvent e);
+void onButtonB(MicroBitEvent e) {
+    currentClass++;
+}
+void onButtonAB(MicroBitEvent e) {
+    model = DecisionTree(NUM_FEATURES, currentClass + 1, currentSample, samples);
+    uBit.serial.printf("Model trained\r\n");
+    training = false;
+}
 
 int main() {
     uBit.init();
