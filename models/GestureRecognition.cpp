@@ -12,16 +12,25 @@ int currentClass = 0; //The ID for the class that the user is currently providin
 int currentSample = 0; //The position in the samples array to add the next sample to
 bool training = true;
 
+/**
+ * A struct which represents a gesture
+ * Contains data from the accelerometer and magnetometer
+ */
 typedef struct {
     float features[FEATURE_COUNT];
 } GestureSample;
 
+/**
+ * A struct which represents a labelled GestureSample
+ */
 typedef struct {
     int sampleClass;
     GestureSample sample;
 } TrainingSample;
 
-//The KNN model
+/**
+ * A class which defines the functionality for a KNN model
+ */
 class KNN {
     public:
         KNN() {}
@@ -42,7 +51,14 @@ class KNN {
         void sortKNearestNeighbours();
         int majorityClass();
 };
-
+/**
+ * The constructor for a KNN model
+ * @param num_features the number of features per sample in the training dataset
+ * @param num_classes the number of classes present in the training dataset
+ * @param k the number of neighbours to consider during prediction
+ * @param lenXTrain the number of samples in the training dataset
+ * @param xTrain the training dataset
+ */
 KNN::KNN(int num_features, int num_classes, int k, int lenXTrain, TrainingSample xTrain[]) {
     this->num_features = num_features;
     this->num_classes = num_classes;
@@ -59,8 +75,11 @@ KNN::KNN(int num_features, int num_classes, int k, int lenXTrain, TrainingSample
         nearestDistances[i] = 1e30f;
     }
 }
-
-//Predict the class of a given sample
+/**
+ * Predict the class of a given sample
+ * @param sample the sample to predict the class of
+ * @return the models prediction
+ */
 int KNN::predict(GestureSample sample) {
     calcKNearestNeighbours(sample); //Update the kNearest and nearestDistances arrays
     int prediction = majorityClass(); //Use the modal class of the kNearest samples to predict the class of the sample
@@ -68,7 +87,10 @@ int KNN::predict(GestureSample sample) {
     return prediction;
 }
 
-//Update the kNearest and nearestDistances arrays
+/**
+ * Calculates the k-nearest neighbours for a given sample
+ * @param s the sample
+ */
 void KNN::calcKNearestNeighbours(GestureSample s) {
     for (int i = 0; i < this->lenXTrain; i++) {
         //Calculate the distance between the sample s and this element in the xTrain array
@@ -89,8 +111,13 @@ void KNN::calcKNearestNeighbours(GestureSample s) {
         }
     }
 }
-
-//Calculate the Squared Euclidean distance between the given sample and the sample at the given index in the xTrain array
+/**
+ * Calculates the Squared Euclidean distance between the given sample and the sample at the given
+ * index in the xTrain array
+ * @param sample1 the sample
+ * @param index the index of the xTrain array
+ * @return the distance between the sample and the sample of the xTrain array
+ */
 float KNN::squared_euclidean_distance(GestureSample sample1, int index) {
     GestureSample sample2 = xTrain[index].sample;
 
@@ -104,8 +131,9 @@ float KNN::squared_euclidean_distance(GestureSample sample1, int index) {
 
     return dist;
 }
-
-//Sort the kNearest and nearestDistances arrays, using bubble sort
+/**
+ * Sorts the kNearest and nearestDistances arrays, using bubble sort
+ */
 void KNN::sortKNearestNeighbours(){
     for (int i = 0; i < k - 1; i++) {
         for (int j = 0; j < k - i - 1; j++) {
@@ -121,8 +149,10 @@ void KNN::sortKNearestNeighbours(){
         }
     }
 }
-
-//Determine the modal class of the kNearest array
+/**
+ * Determine the modal class of the kNearest array
+ * @return the majority class of the k-nearest neighbours
+ */
 int KNN::majorityClass() {
     int majorityClass = 0, maxCount = 0;
 
@@ -175,7 +205,11 @@ void scaleFeatures(float* meanAccX, float* meanAccY, float* meanAccZ, float* var
     *minMagZ /= 30000.0f;
     *maxMagZ /= 30000.0f;
 }
-
+/**
+ * Collects data from the accelerometer and the magnetometer and creates a GestureSample object from
+ * the data
+ * @return the GestureSample created
+ */
 GestureSample takeSample() {
     uint64_t start = system_timer_current_time();
 
@@ -287,7 +321,6 @@ GestureSample takeSample() {
 
     return sample;
 }
-
 void onButtonA(MicroBitEvent e) {
     GestureSample accSample = takeSample();
 
