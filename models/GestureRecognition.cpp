@@ -2,15 +2,11 @@
 #include "samples/Tests.h"
 
 #include <cstdio>
+#include <algorithm>
 
 #define NUM_SAMPLES 100
 #define K_VALUE 5
 #define FEATURE_COUNT 24
-
-MicroBit uBit;
-int currentClass = 0; //The ID for the class that the user is currently providing samples of
-int currentSample = 0; //The position in the samples array to add the next sample to
-bool training = true;
 
 /**
  * A struct which represents a gesture
@@ -173,6 +169,12 @@ int KNN::majorityClass() {
     return majorityClass;
 }
 
+//Global variables
+MicroBit uBit;
+int currentClass = 0; //The ID for the class that the user is currently providing samples of
+int currentSample = 0; //The position in the samples array to add the next sample to
+bool training = true;
+
 TrainingSample samples[NUM_SAMPLES]; //The training data for the model
 KNN model; //The KNN model instance
 
@@ -204,6 +206,24 @@ void scaleFeatures(float* meanAccX, float* meanAccY, float* meanAccZ, float* var
     *maxMagY /= 30000.0f;
     *minMagZ /= 30000.0f;
     *maxMagZ /= 30000.0f;
+}
+void printSample(GestureSample &sample) {
+    //Build the line to print in a buffer and print once (to put everything on one line in the output)
+    char buf[128];
+    int offset = 0;
+
+    for (int i = 0; i < FEATURE_COUNT; i++) {
+        int value = static_cast<int>(sample.features[i] * 1000);
+        offset += snprintf(
+            buf + offset,
+            sizeof(buf) - offset,
+            "%d%s",
+            value,
+            i < FEATURE_COUNT - 1 ? "," : ""
+        );
+    }
+
+    DMESG("%s", buf);
 }
 /**
  * Collects data from the accelerometer and the magnetometer and creates a GestureSample object from
@@ -238,19 +258,19 @@ GestureSample takeSample() {
         auto magX = static_cast<float>(x), magY = static_cast<float>(y), magZ = static_cast<float>(z);
 
         //Update min and max values seen
-        if (accX < minAccX) minAccX = accX;
-        if (accY < minAccY) minAccY = accY;
-        if (accZ < minAccZ) minAccZ = accZ;
-        if (accX > maxAccX) maxAccX = accX;
-        if (accY > maxAccY) maxAccY = accY;
-        if (accZ > maxAccZ) maxAccZ = accZ;
+        minAccX = std::min(minAccX, accX);
+        maxAccX = std::max(maxAccX, accX);
+        minAccY = std::min(minAccY, accY);
+        maxAccY = std::max(maxAccY, accY);
+        minAccZ = std::min(minAccZ, accZ);
+        maxAccZ = std::max(maxAccZ, accZ);
 
-        if (magX < minMagX) minMagX = magX;
-        if (magY < minMagY) minMagY = magY;
-        if (magZ < minMagZ) minMagZ = magZ;
-        if (magX > maxMagX) maxMagX = magX;
-        if (magY > maxMagY) maxMagY = magY;
-        if (magZ > maxMagZ) maxMagZ = magZ;
+        minMagX = std::min(minMagX, magX);
+        maxMagX = std::max(maxMagX, magX);
+        minMagY = std::min(minMagY, magY);
+        maxMagY = std::max(maxMagY, magY);
+        minMagZ = std::min(minMagZ, magZ);
+        maxMagZ = std::max(maxMagZ, magZ);
 
         //Calculate mean and variance
         float diffAccX = accX - meanAccX;
@@ -300,24 +320,8 @@ GestureSample takeSample() {
         minMagX, minMagY, minMagZ, maxMagX, maxMagY, maxMagZ}
     };
 
-
     //Print the sample for debugging
-    //Build the line to print in a buffer and print once (to put everything on one line in the output)
-    char buf[128];
-    int offset = 0;
-
-    for (int i = 0; i < FEATURE_COUNT; i++) {
-        int value = static_cast<int>(sample.features[i] * 1000);
-        offset += snprintf(
-            buf + offset,
-            sizeof(buf) - offset,
-            "%d%s",
-            value,
-            i < FEATURE_COUNT - 1 ? "," : ""
-        );
-    }
-
-    DMESG("%s", buf);
+    printSample(sample);
 
     return sample;
 }
