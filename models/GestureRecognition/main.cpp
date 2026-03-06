@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #define K_VALUE 5
+#define NUM_SAMPLES 100
 
 //Global variables
 MicroBit uBit;
