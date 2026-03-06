@@ -1,523 +1,195 @@
 #include "MicroBit.h"
-#define ARM_MATH_CM4
-#include "arm_math.h"
+#include "samples/Tests.h"
+#include "GestureRecognition.h"
+#include "KNN.h"
 
 #include <cstdio>
+#include <algorithm>
 
-#define SAMPLE_RATE (11 * 1024)
-#define FFT_SIZE 256
-#define NUM_MEL 10
-#define NUM_FEATURES (NUM_MEL * 2)
+#define K_VALUE 5
 
-#define NUM_SAMPLES 150
-#define MAX_DEPTH 6
-#define MIN_SAMPLES_TO_SPLIT 5
-#define MAX_NODES (((MAX_DEPTH + 1) * (MAX_DEPTH + 1)) - 1)
-
-typedef struct {
-    int start, end; // Indexes of the indices array (in the DecisionTree class) that represent the part of the dataset passed to this node
-    int right, left; // Indexes of the nodes array (in the DecisionTree class) that represent this node's children
-    int feature; // Index of the features array (in SpeechSample struct) that this node splits on
-    float threshold; // The threshold value that this node splits on
-    int depth;
-    bool isLeaf;
-    int prediction; // The class this node predicts (only for leaf nodes)
-} TreeNode;
-
-/**
- * A struct which represents a 1-second sample taken from the microphone
- */
-typedef struct {
-    float features[NUM_FEATURES];
-} SpeechSample;
-
-typedef struct {
-    int sampleClass;
-    SpeechSample sample;
-} TrainingSample;
-
-class DecisionTree {
-    public:
-        DecisionTree() = default;
-        DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]);
-        int predict(SpeechSample sample);
-    private:
-        typedef struct {
-            float impurity;
-            float value;
-            int feature;
-        } Split;
-
-        int numFeatures{};
-        int numClasses{};
-        int lenXTrain{};
-        int numNodes{};
-        TrainingSample* xTrain{};
-        TreeNode nodes[MAX_NODES]{};
-        int* indices{};
-
-        void trainModel();
-        Split findBestSplit(int startIndex, int endIndex);
-        float calcGiniFromClassCounts(int* classCounts, int total);
-        float calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold);
-        int reorderIndices(int startIndex, int endIndex, int feature, float threshold);
-        int findMajorityClass(int startIndex, int endIndex);
-};
-
-DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]) {
-    this->numFeatures = numFeatures;
-    this->numClasses = numClasses;
-    this->lenXTrain = lenXTrain;
-    this->xTrain = xTrain;
-
-    this->numNodes = 0;
-    this->indices = new int[lenXTrain];
-    for (int i = 0; i < lenXTrain; i++) {
-        indices[i] = i;
-    }
-
-    trainModel();
-}
-
-void DecisionTree::trainModel() {
-    // A queue to hold the nodes we still need to calculate the feature and threshold for
-    // Stores indexes of the nodes array
-    int queue[MAX_NODES];
-    int start = 0, end = 0;
-
-    // Add the root node to the nodes array and the queue
-    nodes[numNodes++] = {0, lenXTrain - 1, -1, -1, -1, -1, 0, false, -1};
-    queue[end++] = 0;
-
-    // Use the CART algorithm to create the tree
-    // Loop while there are still nodes left in the queue
-    while (start < end) {
-        int currentIndex = queue[start++];
-        TreeNode &current = nodes[currentIndex];
-
-        // Stopping conditions to prevent overfitting
-        if (current.depth >= MAX_DEPTH || current.end - current.start < MIN_SAMPLES_TO_SPLIT) {
-            current.isLeaf = true;
-            current.prediction = findMajorityClass(current.start, current.end);
-            continue;
-        }
-
-        Split bestSplit = findBestSplit(current.start, current.end);
-
-        // Stop splitting as this node is pure (all samples in the data it considers are the same class)
-        if (bestSplit.impurity <= 0) {
-            current.isLeaf = true;
-            current.prediction = findMajorityClass(current.start, current.end);
-            continue;
-        }
-
-        // Reorder indices array and find the index at which the values are split
-        int midIndex = reorderIndices(current.start, current.end, bestSplit.feature, bestSplit.value);
-
-        // Store the feature, value pair for the split at this node
-        current.feature = bestSplit.feature;
-        current.threshold = bestSplit.value;
-
-        // Create the children for this node and add them to the queue
-        int left = numNodes++;
-        int right = numNodes++;
-        current.left = left;
-        current.right = right;
-        nodes[left] = {current.start, midIndex, -1, -1, -1, -1, current.depth + 1, false, -1};
-        nodes[right] = {midIndex + 1, current.end, -1, -1, -1, -1, current.depth + 1, false, -1};
-
-        queue[end++] = left;
-        queue[end++] = right;
-    }
-}
-/**
- * Find the majority class for a given part of the dataset
- * @param startIndex the first index in the indices array to consider
- * @param endIndex the last index in the indices array to consider
- * @return the majority class
- */
-int DecisionTree::findMajorityClass(int startIndex, int endIndex) {
-    int highestClassCount = 0;
-    int majorityClass = 0;
-
-    for (int i = 0; i < numClasses; i++) {
-        int count = 0;
-        for (int j = startIndex; j <= endIndex; j++) {
-            if (xTrain[indices[j]].sampleClass == i) {
-                count++;
-            }
-        }
-
-        if (count > highestClassCount) {
-            highestClassCount = count;
-            majorityClass = i;
-        }
-    }
-
-    return majorityClass;
-}
-/**
- * Find the best feature, value pair to split the data on to reduce the Gini impurity
- * @param startIndex the first index in the indices array to consider
- * @param endIndex the last index of the indices array to consider
- * @return a Split object containing {impurity, value, feature} of the best split found
- */
-DecisionTree::Split DecisionTree::findBestSplit(int startIndex, int endIndex) {
-    Split best = {0, 0, 0};
-
-    // Brute-force each feature,value pair to find the one with the lowest impurity
-    for (int i = 0; i < numFeatures; i++) {
-        for (int j = startIndex; j < endIndex; j++) {
-            float value = xTrain[indices[j]].sample.features[i];
-
-            float splitGini = calcGiniImpurity(startIndex, endIndex, i, value);
-
-            if (splitGini < best.impurity) {
-                best = {splitGini, value, i};
-            }
-        }
-    }
-
-    return best;
-}
-/**
- * Calculate gini impurity for one side of a split, based on given class counts
- * @param classCounts an array of the counts for each class, of size int[numClasses]
- * @param total the total number of samples on this side of the split
- * @return the gini impurity of this side
- */
-float DecisionTree::calcGiniFromClassCounts(int* classCounts, int total) {
-    if (total < 0) {
-        return 0;
-    }
-
-    float sum = 0;
-    for (int i = 0; i < numClasses; i++) {
-        float classProb = static_cast<float>(classCounts[i]) / total;
-        sum += classProb * classProb;
-    }
-
-    return 1 - sum;
-}
-/**
- * Calculate gini impurity for a given split
- * @param startIndex the first index of the indices array to consider
- * @param endIndex the last index of the indices array to consider
- * @param feature the feature to split on
- * @param threshold the value to split the given feature on
- * @return the weighted gini impurity of the split
- */
-float DecisionTree::calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold) {
-    int leftClassCounts[numClasses];
-    int rightClassCounts[numClasses];
-    int numLeft = 0;
-    int numRight = 0;
-
-    for (int i = 0; i < numClasses; i++) {
-        leftClassCounts[i] = rightClassCounts[i] = 0;
-    }
-
-    // Count the number of samples in each class to the left and right of the threshold
-    for (int i = startIndex; i <= endIndex; i++) {
-        int label = xTrain[indices[i]].sampleClass;
-        float featureValue = xTrain[indices[i]].sample.features[feature];
-
-        if (featureValue < threshold) {
-            leftClassCounts[label]++;
-            numLeft++;
-        } else {
-            rightClassCounts[label]++;
-            numRight++;
-        }
-    }
-
-    float giniLeft = calcGiniFromClassCounts(leftClassCounts, numLeft);
-    float giniRight = calcGiniFromClassCounts(rightClassCounts, numRight);
-
-    float weightedGini = (numLeft * giniLeft + numRight * giniRight) / (numLeft + numRight);
-    return weightedGini;
-}
-/**
- * Reorders a part of the indices array so that all the indices whose corresponding sample has a feature value < threshold are on the left,
- * and samples with a feature value > threshold are on the right
- *
- * @param startIndex the first index to consider
- * @param endIndex the last index to consider
- * @param feature the feature whose value we are interested in (as an index of the features array in a SpeechSample struct)
- * @param threshold the threshold value to compare feature values to
- * @return the index of the last index in the indices array whose corresponding sample in xTrain has a feature value < threshold
- */
-int DecisionTree::reorderIndices(int startIndex, int endIndex, int feature, float threshold) {
-    // Index of the first index in the indices array, whose corresponding sample in xTrain has a feature value >= threshold
-    int greaterThan = startIndex;
-
-    for (int i = startIndex; i <= endIndex; i ++) {
-        TrainingSample &trainingSample = xTrain[indices[i]];
-
-        if (trainingSample.sample.features[feature] < threshold) {
-            int temp = indices[i];
-            indices[i] = indices[greaterThan];
-            indices[greaterThan++] = temp;
-        }
-    }
-
-    // Return the index of the last item < threshold
-    return greaterThan - 1;
-}
-/**
- * Predict the class of the given sample
- *
- * @param sample the sample to predict the class of
- * @return the predicted class
- */
-int DecisionTree::predict(SpeechSample sample) {
-    TreeNode current = nodes[0]; // Start traversal at the root node
-
-    while (!current.isLeaf) {
-        if (sample.features[current.feature] < current.threshold) {
-            current = nodes[current.left];
-        } else {
-            current = nodes[current.right];
-        }
-    }
-
-    return current.prediction;
-}
-
-class MicSink : public DataSink {
-    public:
-        MicSink(DataSource &source);
-        int pullRequest() override;
-        ManagedBuffer getBuffer();
-    private:
-        DataSource &upstream;
-        ManagedBuffer buffer;
-};
-
-MicSink::MicSink(DataSource &source) : upstream(source) {
-    upstream.connect(*this);
-    buffer = ManagedBuffer();
-}
-
-int MicSink::pullRequest() {
-    buffer = upstream.pull();
-
-    if (buffer.length() == 0) {
-        return DEVICE_NO_DATA;
-    }
-
-    return DEVICE_OK;
-}
-
-ManagedBuffer MicSink::getBuffer() {
-    return buffer;
-}
-
-// Global variables
+//Global variables
 MicroBit uBit;
-arm_rfft_fast_instance_f32 fftInstance;
-auto sink = MicSink( *uBit.audio.rawSplitter->createChannel());
-DecisionTree model;
-
 int currentClass = 0; //The ID for the class that the user is currently providing samples of
 int currentSample = 0; //The position in the samples array to add the next sample to
-TrainingSample samples[NUM_SAMPLES];
 bool training = true;
 
-int melBins[NUM_MEL + 2];
-float melWeights[NUM_MEL][FFT_SIZE / 2];
-float window[FFT_SIZE];
-float fftOutput[FFT_SIZE];
-float magnitudeSpectrum[FFT_SIZE / 2];
-float melOutput[NUM_MEL];
+TrainingSample samples[NUM_SAMPLES]; //The training data for the model
+KNN model; //The KNN model instance
 
-void applyMelFilters(float* fft, float* mel) {
-    // Loop over the filters
-    for (int i = 0; i < NUM_MEL; i++) {
-        float sum = 0;
+//Scale features to stop distances becoming huge
+void scaleFeatures(float* meanAccX, float* meanAccY, float* meanAccZ, float* varAccX, float* varAccY, float* varAccZ, float* minAccX, float* minAccY, float* minAccZ, float* maxAccX, float* maxAccY, float* maxAccZ,
+                    float* meanMagX, float* meanMagY, float* meanMagZ, float* varMagX, float* varMagY, float* varMagZ, float* minMagX, float* minMagY, float* minMagZ, float* maxMagX, float* maxMagY, float* maxMagZ) {
+    *meanAccX /= 2048.0f;
+    *meanAccY /= 2048.0f;
+    *meanAccZ /= 2048.0f;
+    *varAccX /= 1e6f;
+    *varAccY /= 1e6f;
+    *varAccZ /= 1e6f;
+    *minAccX /= 2048.0f;
+    *maxAccX /= 2048.0f;
+    *minAccY /= 2048.0f;
+    *maxAccY /= 2048.0f;
+    *minAccZ /= 2048.0f;
+    *maxAccZ /= 2048.0f;
 
-        // Apply filter
-        for (int j = melBins[i]; j < melBins[i + 2]; j++) {
-            sum += fft[j] * melWeights[i][j];
-        }
-        mel[i] = sum;
-    }
+    *meanMagX /= 30000.0f;
+    *meanMagY /= 30000.0f;
+    *meanMagZ /= 30000.0f;
+    *varMagX /= 1e9f;
+    *varMagY /= 1e9f;
+    *varMagZ /= 1e9f;
+    *minMagX /= 30000.0f;
+    *maxMagX /= 30000.0f;
+    *minMagY /= 30000.0f;
+    *maxMagY /= 30000.0f;
+    *minMagZ /= 30000.0f;
+    *maxMagZ /= 30000.0f;
 }
-
-void applyfftAndMel() {
-    // Calculate FFT and magnitude spectrum
-    arm_rfft_fast_f32(&fftInstance, window, fftOutput, 0);
-    arm_cmplx_mag_f32(fftOutput, magnitudeSpectrum, FFT_SIZE / 2);
-
-    // Apply Mel Filterbank to the magnitude spectrum
-    applyMelFilters(magnitudeSpectrum, melOutput);
-}
-
-SpeechSample takeSample() {
-    int windowIndex = 0;
-    int count = 0;
-    uint64_t start = system_timer_current_time();
-
-    float means[NUM_MEL] = {0};
-    float m2s[NUM_MEL] = {0};
-
-    while (system_timer_current_time() - start < 1000) {
-        // Pull a sample from the mic
-        int resp = sink.pullRequest();
-
-        if (resp != DEVICE_OK) {
-            continue;
-        }
-
-        ManagedBuffer buf = sink.getBuffer();
-        uint8_t* bytes = buf.getBytes();
-
-        // Get the data back into 16 bit format
-        auto micSamples = reinterpret_cast<int16_t*>(bytes);
-        int numSamples = buf.length() / 2;
-
-        char buffer[128];
-        int offset = 0;
-
-        for (int i = 0; i < numSamples; i++) {
-            offset += snprintf(
-                buffer + offset,
-                sizeof(buffer) - offset,
-                "%d%s",
-                micSamples[i],
-                i < numSamples - 1 ? "," : ""
-            );
-        }
-
-        DMESG("%s", buffer);
-
-        // Store samples in a window until we have enough to perform a fft
-        for (int i = 0; i < numSamples; i++) {
-            window[windowIndex++] = micSamples[i]  * (1.0f / 32768.0f); // Normalises the data to floats in the range (-1, 1)
-
-            if (windowIndex == FFT_SIZE) {
-                applyfftAndMel();
-                windowIndex = 0;
-                count++;
-
-                // Calculate mean and m2 (used in variance calculation) to allow aggregation of the melOutput for different windows
-                for (int j = 0; j < NUM_MEL; j++) {
-                    float diff = melOutput[j] - means[j];
-
-                    means[j] += diff / count;
-                    m2s[j] += diff * (melOutput[j] - means[j]);
-                }
-            }
-        }
-    }
-
-    count--;
-    float variances[NUM_MEL] = {0};
-    for (int i = 0; i < NUM_MEL; i++) {
-        variances[i] = m2s[i] / count;
-    }
-
-    // Pack aggregated melOutputs into a SpeechSample
-    SpeechSample sample;
-    for (int i = 0; i < NUM_MEL; i++) {
-        sample.features[i] = log10f(means[i] + 1e-6f);
-    }
-    for (int i = 0; i < NUM_MEL; i++) {
-        sample.features[NUM_MEL + i] = variances[i];
-    }
-
-    //Print the sample for debugging
+void printSample(GestureSample &sample) {
     //Build the line to print in a buffer and print once (to put everything on one line in the output)
     char buf[128];
     int offset = 0;
 
-    for (int i = 0; i < NUM_FEATURES; i++) {
+    for (int i = 0; i < FEATURE_COUNT; i++) {
         int value = static_cast<int>(sample.features[i] * 1000);
         offset += snprintf(
             buf + offset,
             sizeof(buf) - offset,
             "%d%s",
             value,
-            i < NUM_FEATURES - 1 ? "," : ""
+            i < FEATURE_COUNT - 1 ? "," : ""
         );
     }
 
     DMESG("%s", buf);
+}
+/**
+ * Collects data from the accelerometer and the magnetometer and creates a GestureSample object from
+ * the data
+ * @return the GestureSample created
+ */
+GestureSample takeSample() {
+    uint64_t start = system_timer_current_time();
+
+    //The mean and variance of the samples is calculated using Welford's algorithm
+    //This allows for calculations are the stream of inputs is coming in
+    float count = 0;
+    float meanAccX = 0, meanAccY = 0, meanAccZ = 0;
+    float m2AccX = 0, m2AccY = 0, m2AccZ = 0; //Running sum of squared differences from the mean
+    float minAccX = 2500, minAccY = 2500, minAccZ = 2500; //Set all the min values to something higher than a real sample
+    float maxAccX = -2500, maxAccY = -2500, maxAccZ = -2500; //Set all the max values to something lower than a real sample
+
+    //As mag values can be large, the mean and m2 values are stored as doubles to prevent overflow
+    double dMeanMagX = 0, dMeanMagY = 0, dMeanMagZ = 0;
+    double m2MagX = 0, m2MagY = 0, m2MagZ = 0;
+    float minMagX = 1e9f, minMagY = 1e9f, minMagZ = 1e9f;
+    float maxMagX = -1e9f, maxMagY = -1e9f, maxMagZ = -1e9f;
+
+    while (system_timer_current_time() - start < 1000) {
+        Sample3D accSample = uBit.accelerometer.getSample();
+        int x = uBit.compass.getX();
+        int y = uBit.compass.getY();
+        int z = uBit.compass.getZ();
+        count++;
+
+        auto accX = static_cast<float>(accSample.x), accY = static_cast<float>(accSample.y), accZ = static_cast<float>(accSample.z);
+        auto magX = static_cast<float>(x), magY = static_cast<float>(y), magZ = static_cast<float>(z);
+
+        //Update min and max values seen
+        minAccX = std::min(minAccX, accX);
+        maxAccX = std::max(maxAccX, accX);
+        minAccY = std::min(minAccY, accY);
+        maxAccY = std::max(maxAccY, accY);
+        minAccZ = std::min(minAccZ, accZ);
+        maxAccZ = std::max(maxAccZ, accZ);
+
+        minMagX = std::min(minMagX, magX);
+        maxMagX = std::max(maxMagX, magX);
+        minMagY = std::min(minMagY, magY);
+        maxMagY = std::max(maxMagY, magY);
+        minMagZ = std::min(minMagZ, magZ);
+        maxMagZ = std::max(maxMagZ, magZ);
+
+        //Calculate mean and variance
+        float diffAccX = accX - meanAccX;
+        float diffAccY = accY - meanAccY;
+        float diffAccZ = accZ - meanAccZ;
+        meanAccX += diffAccX / count;
+        meanAccY += diffAccY / count;
+        meanAccZ += diffAccZ / count;
+        m2AccX += diffAccX * (accX - meanAccX);
+        m2AccY += diffAccY * (accY - meanAccY);
+        m2AccZ += diffAccZ * (accZ - meanAccZ);
+
+        double diffMagX = magX - dMeanMagX;
+        double diffMagY = magY - dMeanMagY;
+        double diffMagZ = magZ - dMeanMagZ;
+        dMeanMagX += diffMagX / count;
+        dMeanMagY += diffMagY / count;
+        dMeanMagZ += diffMagZ / count;
+        m2MagX += diffMagX * (magX - dMeanMagX);
+        m2MagY += diffMagY * (magY - dMeanMagY);
+        m2MagZ += diffMagZ * (magZ - dMeanMagZ);
+
+        uBit.sleep(2);
+    }
+
+    //Calculate variance
+    float varAccX = m2AccX / (count - 1);
+    float varAccY = m2AccY / (count - 1);
+    float varAccZ = m2AccZ / (count - 1);
+
+    float varMagX = static_cast<float>(m2MagX) / (count - 1);
+    float varMagY = static_cast<float>(m2MagY) / (count - 1);
+    float varMagZ = static_cast<float>(m2MagZ) / (count - 1);
+
+    //Cast mag mean values down to floats
+    auto meanMagX = static_cast<float>(dMeanMagX);
+    auto meanMagY = static_cast<float>(dMeanMagY);
+    auto meanMagZ = static_cast<float>(dMeanMagZ);
+
+    scaleFeatures(&meanAccX, &meanAccY, &meanAccZ, &varAccX, &varAccY, &varAccZ, &minAccX, &minAccY, &minAccZ, &maxAccX, &maxAccY, &maxAccZ,
+                    &meanMagX, &meanMagY, &meanMagZ, &varMagX, &varMagY, &varMagZ, &minMagX, &minMagY, &minMagZ, &maxMagX, &maxMagY, &maxMagZ);
+
+    GestureSample sample = {
+        {meanAccX, meanAccY, meanAccZ, varAccX, varAccY, varAccZ,
+        minAccX, minAccY, minAccZ, maxAccX, maxAccY, maxAccZ,
+        meanMagX, meanMagY, meanMagZ, varMagX, varMagY, varMagZ,
+        minMagX, minMagY, minMagZ, maxMagX, maxMagY, maxMagZ}
+    };
+
+    //Print the sample for debugging
+    printSample(sample);
 
     return sample;
 }
-
-float hzToMel(float hz) {
-    return 2595.0f * log10f(1.0f + hz / 700.0f);
-}
-
-float melToHz(float mel) {
-    return 700.0f * (powf(10.0f, mel / 2959.0f) - 1.0f);
-}
-
-void computeMelFilterbank() {
-    // Initialise all weights to 0
-    memset(melWeights, 0, sizeof(melWeights));
-
-    float low = hzToMel(0);
-    float high = hzToMel(SAMPLE_RATE / 2);
-    float step = (high - low) / (NUM_MEL + 1);
-
-    // Calculate what mel values go into each fft bin
-    // Need NUM_MEL_FILTERS + 2 as each of the triangles need 3 points
-    for (int i = 0; i < NUM_MEL + 2; i++) {
-        float hz = melToHz(low + i * step);
-
-        melBins[i] = static_cast<int>((FFT_SIZE + 1) * hz / SAMPLE_RATE);
-    }
-
-    // Build mel triangle
-    for (int i = 0; i < NUM_MEL; i++) {
-        int left = melBins[i];
-        int centre = melBins[i + 1];
-        int right = melBins[i + 2];
-
-        // Rising slope
-        for (int j = left; j < centre; j++) {
-            melWeights[i][j] = static_cast<float>((j - left) / (centre - left));
-        }
-        // Falling slope
-        for (int j = centre; j < right; j++) {
-            melWeights[i][j] = static_cast<float>((right - j) / (right - centre));
-        }
-    }
-}
-
-void onButtonA(MicroBitEvent e){
-    SpeechSample speechSample = takeSample();
+void onButtonA(MicroBitEvent e) {
+    GestureSample accSample = takeSample();
 
     if (training) {
-        TrainingSample sample = {currentClass, speechSample};
+        TrainingSample sample = {currentClass, accSample};
         samples[currentSample++] = sample;
     } else {
-        //int prediction = model.predict(speechSample);
-        // uBit.serial.printf("Prediction %d\r\n", prediction);
-        // uBit.display.print(prediction);
+        int prediction = model.predict(accSample);
+        uBit.serial.printf("Prediction %d\r\n", prediction);
+        uBit.display.print(prediction);
     }
 }
+
 void onButtonB(MicroBitEvent e) {
     currentClass++;
 }
+
 void onButtonAB(MicroBitEvent e) {
-    model = DecisionTree(NUM_FEATURES, currentClass + 1, currentSample, samples);
+    model = KNN(FEATURE_COUNT, currentClass + 1, K_VALUE, currentSample, samples);
     uBit.serial.printf("Model trained\r\n");
     training = false;
 }
 
 int main() {
     uBit.init();
-    uBit.audio.enable();
-
-    // Initialise the fft instance
-    arm_rfft_fast_init_f32(&fftInstance, FFT_SIZE);
-
-    // Compute Mel filterbank
-    computeMelFilterbank();
+    uBit.compass.calibrate();
 
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_A, MICROBIT_BUTTON_EVT_CLICK, onButtonA);
     uBit.messageBus.listen(MICROBIT_ID_BUTTON_B, MICROBIT_BUTTON_EVT_CLICK, onButtonB);
