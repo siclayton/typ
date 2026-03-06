@@ -5,14 +5,14 @@
 #ifndef CODAL_GESTURERECOGNITION_H
 #define CODAL_GESTURERECOGNITION_H
 
-#define FEATURE_COUNT 24
+#define NUM_FEATURES 24
 
 /**
  * A struct which represents a gesture
  * Contains data from the accelerometer and magnetometer
  */
 typedef struct {
-    float features[FEATURE_COUNT];
+    float features[NUM_FEATURES];
 } GestureSample;
 
 /**
