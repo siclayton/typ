@@ -2,6 +2,7 @@
 // Created by simon on 06/03/2026.
 //
 
+#include "MicroBit.h"
 #include "DecisionTree.h"
 
 DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]) {
@@ -34,21 +35,14 @@ void DecisionTree::trainModel() {
         int currentIndex = queue[start++];
         TreeNode &current = nodes[currentIndex];
 
-        // Stopping conditions to prevent overfitting
-        if (current.depth >= MAX_DEPTH || current.end - current.start < MIN_SAMPLES_TO_SPLIT) {
+        // Stopping conditions
+        if (current.depth >= MAX_DEPTH || current.end - current.start < MIN_SAMPLES_TO_SPLIT || nodeIsPure(current)) {
             current.isLeaf = true;
             current.prediction = findMajorityClass(current.start, current.end);
             continue;
         }
 
         Split bestSplit = findBestSplit(current.start, current.end);
-
-        // Stop splitting as this node is pure (all samples in the data it considers are the same class)
-        if (bestSplit.impurity <= 0) {
-            current.isLeaf = true;
-            current.prediction = findMajorityClass(current.start, current.end);
-            continue;
-        }
 
         // Reorder indices array and find the index at which the values are split
         int midIndex = reorderIndices(current.start, current.end, bestSplit.feature, bestSplit.value);
@@ -68,6 +62,31 @@ void DecisionTree::trainModel() {
         queue[end++] = left;
         queue[end++] = right;
     }
+
+    for (int i = 0; i < numNodes; i++) {
+        TreeNode &n = nodes[i];
+        if (n.isLeaf) {
+            DMESG("Node %d: LEAF prediction=%d (start=%d end=%d)", i, n.prediction, n.start, n.end);
+        } else {
+            DMESG("Node %d: SPLIT feature=%d threshold=%d left=%d right=%d", i, n.feature, (int)(n.threshold * 1000), n.left, n.right);
+        }
+    }
+}
+/**
+ * Checks whether the part of the dataset that a given node considers is made up of only one class
+ * @param node the node to check
+ * @return true if the node is pure, false if not
+ */
+bool DecisionTree::nodeIsPure(TreeNode node) {
+    int sampleClass = xTrain[indices[node.start]].sampleClass;
+
+    for (int i = node.start + 1; i <= node.end; i++) {
+        if (xTrain[indices[i]].sampleClass != sampleClass) {
+            return false;
+        }
+    }
+
+    return true;
 }
 /**
  * Find the majority class for a given part of the dataset

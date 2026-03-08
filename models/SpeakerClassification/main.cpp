@@ -16,12 +16,14 @@ class MicSink : public DataSink {
     private:
         DataSource &upstream;
         ManagedBuffer buffer;
+        volatile bool newDataAvailable;
 };
 
 MicSink::MicSink(DataSource &source) : upstream(source) {
     upstream.connect(*this);
     upstream.dataWanted(DATASTREAM_WANTED);
     buffer = ManagedBuffer();
+    newDataAvailable = false;
 }
 
 int MicSink::pullRequest() {
@@ -31,10 +33,16 @@ int MicSink::pullRequest() {
         return DEVICE_NO_DATA;
     }
 
+    newDataAvailable = true;
     return DEVICE_OK;
 }
 
 ManagedBuffer MicSink::getBuffer() {
+    while (!newDataAvailable) {
+        fiber_sleep(1);
+    }
+
+    newDataAvailable = false;
     return buffer;
 }
 
@@ -92,23 +100,8 @@ SpeechSample takeSample() {
 
         // Get the data back into 16 bit format
         auto micSamples = reinterpret_cast<int16_t*>(bytes);
+
         int numSamples = buf.length() / 2;
-        DMESG("%d", numSamples * 2);
-
-        char buffer[128];
-        int offset = 0;
-
-        for (int i = 0; i < numSamples; i++) {
-            offset += snprintf(
-                buffer + offset,
-                sizeof(buffer) - offset,
-                "%d%s",
-                micSamples[i],
-                i < numSamples - 1 ? "," : ""
-            );
-        }
-
-        DMESG("%s", buffer);
 
         // Store samples in a window until we have enough to perform a fft
         for (int i = 0; i < numSamples; i++) {

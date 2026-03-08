@@ -42,6 +42,7 @@ private:
     int* indices{};
 
     void trainModel();
+    bool nodeIsPure(TreeNode node);
     Split findBestSplit(int startIndex, int endIndex);
     float calcGiniFromClassCounts(int* classCounts, int total);
     float calcGiniImpurity(int startIndex, int endIndex, int feature, float threshold);
