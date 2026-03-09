@@ -2,8 +2,8 @@
 // Created by simon on 06/03/2026.
 //
 
-#ifndef CODAL_DECISIONTREE_H
-#define CODAL_DECISIONTREE_H
+#ifndef DECISIONTREE_H
+#define DECISIONTREE_H
 
 #include "SpeakerClassification.h"
 
@@ -42,6 +42,8 @@ private:
     int* indices{};
 
     void trainModel();
+    void createChildren(TreeNode &current, int* queue, int* end, int midIndex);
+    void printTree();
     bool nodeIsPure(TreeNode node);
     Split findBestSplit(int startIndex, int endIndex);
     float calcGiniFromClassCounts(int* classCounts, int total);
@@ -50,4 +52,4 @@ private:
     int findMajorityClass(int startIndex, int endIndex);
 };
 
-#endif // CODAL_DECISIONTREE_H
+#endif
