@@ -1,0 +1,3 @@
+[submodule "libraries/codal-microbit-v2"]
+	path = libraries/codal-microbit-v2
+	url = https://github.com/siclayton/codal-microbit-v2.git
