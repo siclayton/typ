@@ -18,8 +18,7 @@ LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenXTrain,
     this->xTrain = xTrain;
 
     //Initialise both the weights and bias to 0
-    this->weights = new float[numFeatures];
-    for (int i = 0; i < numFeatures; i++){
+    for (int i = 0; i < NUM_FEATURES; i++){
         this->weights[i] = 0;
     }
     this->bias = 0;
@@ -122,7 +121,7 @@ float *LogisticRegressionModel::calcWeightsUpdates(float* preds) {
         TrainingSample curr = xTrain[i];
         float error = preds[i] - static_cast<float>(curr.sampleClass);
 
-        for (int j = 0; i < numFeatures; j++) {
+        for (int j = 0; j < numFeatures; j++) {
             updateAmounts[j] += error * curr.sample.features[j];
         }
     }
