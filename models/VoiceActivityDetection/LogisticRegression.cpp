@@ -1,14 +1,22 @@
-//
-// Created by simon on 06/03/2026.
-//
-
 #include "LogisticRegression.h"
 #include <cmath>
 
-// Constructor that uses default parameters for the maximum number of iterations, the learning rate and the loss increase threshold
+/**
+ * A constructor for a LogisticRegressionModel instance that uses default parameters for the maximum number of iterations, the learning rate and the loss increase threshold
+ */
 LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenXTrain, TrainingSample xTrain[]) :
-    LogisticRegressionModel(numFeatures, lenXTrain, 5000, 0.01, 1e-5, xTrain) {}
-
+    LogisticRegressionModel(numFeatures, lenXTrain, 5000, 0.01, 1e-5, xTrain) {
+}
+/**
+ * A constructor for a LogisticRegression instance
+ * @param numFeatures the number of features that each sample in the training data has
+ * @param lenXTrain the number of samples in the training data
+ * @param maxIter the maximum number of iterations that the training loop should be run for
+ * @param lr the learning rate of the model
+ * @param threshold the amount that the loss needs to decrease buy each iteration for the training
+ * loop to continue
+ * @param xTrain the trainng data array
+ */
 LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenXTrain, int maxIter, float lr, float threshold, TrainingSample xTrain[]) {
     this->numFeatures = numFeatures;
     this->lenXTrain = lenXTrain;
@@ -26,7 +34,9 @@ LogisticRegressionModel::LogisticRegressionModel(int numFeatures, int lenXTrain,
 
     trainModel();
 }
-
+/**
+ * Runs the training loop for the model
+ */
 void LogisticRegressionModel::trainModel() {
     float previousLoss = 1000; //Set to a large value (any actual loss will be smaller than this)
     auto* predictions = new float[lenXTrain];
@@ -61,11 +71,19 @@ void LogisticRegressionModel::trainModel() {
 
     delete[] predictions;
 }
-
+/**
+ * Computes the result of the sigmoid function on the given value
+ * @param x the given value
+ * @return the results if the sigmoid function
+ */
 double LogisticRegressionModel::sigmoid(double x) {
     return 1 / (1 + exp(-x));
 }
-
+/**
+ * Computes the dot product of the given sample and the model's weights
+ * @param s the given sample
+ * @return the result of the dot product calculation
+ */
 float LogisticRegressionModel::dotProduct(MicrophoneSample s) {
     float logit = 0;
 
@@ -76,7 +94,12 @@ float LogisticRegressionModel::dotProduct(MicrophoneSample s) {
 
     return logit;
 }
-
+/**
+ * Calculates the dot product and then passes the output of that to the sigmoid function
+ * This is the prediction for a sample without thresholding it
+ * @param sample the sample to predict
+ * @return the prediction
+ */
 float LogisticRegressionModel::predict(MicrophoneSample sample) {
     float logit = dotProduct(sample) + bias;
 
@@ -84,7 +107,11 @@ float LogisticRegressionModel::predict(MicrophoneSample sample) {
 
     return prediction;
 }
-
+/**
+ * Calculates the cross entropy loss of the predicted classes and the actual classes of the sample
+ * @param preds the predicted classes of the samples
+ * @return the loss
+ */
 float LogisticRegressionModel::crossEntropyLoss(float* preds) {
     double loss = 0;
 
@@ -103,7 +130,11 @@ float LogisticRegressionModel::crossEntropyLoss(float* preds) {
 
     return -loss / static_cast<float>(lenXTrain);
 }
-
+/**
+ * Calculate how much the bias needs to be updated by
+ * @param preds the predicted classes of the samples
+ * @return the amount the bias should be updated by
+ */
 float LogisticRegressionModel::calcBiasUpdate(float* preds) {
     float updateAmount = 0;
 
@@ -113,7 +144,11 @@ float LogisticRegressionModel::calcBiasUpdate(float* preds) {
 
     return updateAmount / static_cast<float>(lenXTrain);
 }
-
+/**
+ * Calculate how much the weights needs to be updated by
+ * @param preds the predicted classes of the samples
+ * @return the amount each weight should be updated by
+ */
 float *LogisticRegressionModel::calcWeightsUpdates(float* preds) {
     auto* updateAmounts = new float[numFeatures]();
 
@@ -133,8 +168,11 @@ float *LogisticRegressionModel::calcWeightsUpdates(float* preds) {
     return updateAmounts;
 }
 
-//Return a prediction of the class of the given sample
-//  1 means the model predicts speech, 0 means the model predicts no speech
+/**
+* Return a prediction of the class of the given sample
+ * @param s the sample to predict the class of
+ * @return 1 if the model predicts speech, 0 if the model predicts no speech
+ */
 int LogisticRegressionModel::predictClass(MicrophoneSample s) {
     float sigmoidOutput = predict(s);
 

@@ -1,10 +1,13 @@
-//
-// Created by simon on 06/03/2026.
-//
-
 #include "MicroBit.h"
 #include "DecisionTree.h"
 
+/**
+ * The constructor for a DecisionTree instance
+ * @param numFeatures the number of features each sample in the training data has
+ * @param numClasses the number of classes in the training data
+ * @param lenXTrain the number of samples in the training data
+ * @param xTrain the training data array
+ */
 DecisionTree::DecisionTree(int numFeatures, int numClasses, int lenXTrain, TrainingSample xTrain[]) {
     this->numFeatures = numFeatures;
     this->numClasses = numClasses;

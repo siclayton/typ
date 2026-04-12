@@ -1,5 +1,4 @@
 #include "MicroBit.h"
-#include "samples/Tests.h"
 #include "GestureRecognition.h"
 #include "KNN.h"
 

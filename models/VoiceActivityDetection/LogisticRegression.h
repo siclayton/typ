@@ -1,9 +1,5 @@
-//
-// Created by simon on 06/03/2026.
-//
-
-#ifndef CODAL_LOGISTICREGRESSION_H
-#define CODAL_LOGISTICREGRESSION_H
+#ifndef LOGISTICREGRESSION_H
+#define LOGISTICREGRESSION_H
 
 #include "VoiceActivityDetection.h"
 
@@ -33,4 +29,4 @@ private:
     float* calcWeightsUpdates(float[]);
 };
 
-#endif // CODAL_LOGISTICREGRESSION_H
+#endif

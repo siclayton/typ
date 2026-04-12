@@ -1,9 +1,12 @@
-//
-// Created by simon on 07/03/2026.
-//
-
 #include "NaiveBayes.h"
 
+/**
+ * Constructor for a NaiveBayesModel instance
+ * @param numFeatures the number of features that each sample in the training data has
+ * @param numClasses the number of classes in the training data
+ * @param lenXTrain the number of samples in the training data
+ * @param xTrain the training data array
+ */
 NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain, TrainingSample* xTrain) {
     this->numFeatures = numFeatures;
     this->numClasses = numClasses;
@@ -25,7 +28,9 @@ NaiveBayesModel::NaiveBayesModel(int numFeatures, int numClasses, int lenXTrain,
 
     trainModel();
 }
-
+/**
+ * Calculates the class and conditional probabilities used to make predictions
+ */
 void NaiveBayesModel::trainModel() {
     for (int i = 0; i < lenXTrain; i++) {
         //Count the number of occurrences of each class in the training data
@@ -42,20 +47,20 @@ void NaiveBayesModel::trainModel() {
 
     calcClassProbabilities();
     calcConditionalProbabilities();
-
-    for (int i = 0; i < numClasses * numFeatures * NUM_BINS; i++) {
-        uBit.serial.printf("\r\n");
-        uBit.serial.printf("%d, ", static_cast<int>(conditionalProbabilities[i] * 1000));
-        if ((i + 1) % 4 == 0) uBit.serial.printf("\r\n");
-    }
 }
-
+/**
+ * Populates the classProbabilities array with the probability of choosing a sample of each class
+ * from the training data
+ */
 void NaiveBayesModel::calcClassProbabilities() {
     for (int i = 0; i < numClasses; i++) {
         classProbabilities[i] = static_cast<float>(classCounts[i]) / static_cast<float>(lenXTrain);
     }
 }
-
+/**
+ * Populates the conditionalProbabilities array with the probability of each class given the feature
+ * values
+ */
 void NaiveBayesModel::calcConditionalProbabilities() {
     //Count how many occurrences of each feature "value" there are
     //The values have been split into 4 bins
@@ -84,14 +89,19 @@ void NaiveBayesModel::calcConditionalProbabilities() {
         }
     }
 }
-
-// Get the index of the array for the given class, feature and bin for the conditionalProbabilites array
-// This is needed as the conditionalProbabilties array is 1D
+/**
+ * Get the index of the array for the given class, feature and bin for the conditionalProbabilities array
+ * This is needed as the conditionalProbabilities array is 1D
+ */
 int NaiveBayesModel::getCProbIndex(int c, int feature, int bin) {
     return c * numFeatures * NUM_BINS + feature * NUM_BINS + bin;
 }
-
-// Return the bin that the given value belongs in for the given feature
+/**
+ * Return the bin that the given value belongs in for the given feature
+ * @param feature the feature being considered (given as an index of the features array)
+ * @param value the value of the feature
+ * @return the corresponding bin
+ */
 int NaiveBayesModel::getBin(int feature, float value) {
     float range = maxFeatureValues[feature] - minFeatureValues[feature];
 
@@ -107,7 +117,11 @@ int NaiveBayesModel::getBin(int feature, float value) {
 
     return bin;
 }
-
+/**
+ * Predict the class of the given sample
+ * @param sample the sample to predict the class of
+ * @return the class that the model predicts
+ */
 int NaiveBayesModel::predict(EnvironmentSample sample) {
     int prediction = 0;
     float highestProbability = -1e30f; //Set highestProbability to a low negative number

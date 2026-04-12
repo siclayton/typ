@@ -35,4 +35,4 @@ private:
     int getBin(int feature, float value);
 };
 
-#endif // NAIVEBAYES_H
+#endif

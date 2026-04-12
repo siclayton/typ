@@ -8,6 +8,9 @@
 
 #define NUM_SAMPLES 150
 
+/**
+ * A class which acts as a DataSink for microphone data
+ */
 class MicSink : public DataSink {
     public:
         MicSink(DataSource &source);
@@ -18,14 +21,20 @@ class MicSink : public DataSink {
         ManagedBuffer buffer;
         volatile bool newDataAvailable;
 };
-
+/**
+ * The constructor for a MicSink instance
+ * @param source the DataSource to pull data from
+ */
 MicSink::MicSink(DataSource &source) : upstream(source) {
     upstream.connect(*this);
     upstream.dataWanted(DATASTREAM_WANTED);
     buffer = ManagedBuffer();
     newDataAvailable = false;
 }
-
+/**
+ * Pulls data from the upstream component
+ * @return DEVICE_NO_DATA if no data was received, else DEVICE_OK
+ */
 int MicSink::pullRequest() {
     buffer = upstream.pull();
 
@@ -36,7 +45,11 @@ int MicSink::pullRequest() {
     newDataAvailable = true;
     return DEVICE_OK;
 }
-
+/**
+ * Gets the buffered data stored by the MicSink
+ * This method blocks until there is new data
+ * @return the buffer
+ */
 ManagedBuffer MicSink::getBuffer() {
     while (!newDataAvailable) {
         fiber_sleep(1);
@@ -64,6 +77,11 @@ float fftOutput[FFT_SIZE];
 float magnitudeSpectrum[FFT_SIZE / 2];
 float melOutput[NUM_MEL];
 
+/**
+ * Applies the precomputer Mel filterbank weights to the magnitude spectrum of a fft
+ * @param fft the magnitude spectrum
+ * @param mel the array to put the results into
+ */
 void applyMelFilters(float* fft, float* mel) {
     // Loop over the filters
     for (int i = 0; i < NUM_MEL; i++) {
@@ -76,7 +94,9 @@ void applyMelFilters(float* fft, float* mel) {
         mel[i] = sum;
     }
 }
-
+/**
+ * Apply a fft and then Mel filterbank to the current window of data collected
+ */
 void applyfftAndMel() {
     // Calculate FFT and magnitude spectrum
     arm_rfft_fast_f32(&fftInstance, window, fftOutput, 0);
@@ -85,7 +105,10 @@ void applyfftAndMel() {
     // Apply Mel Filterbank to the magnitude spectrum
     applyMelFilters(magnitudeSpectrum, melOutput);
 }
-
+/**
+ * Collect a sample which represents a person speaking
+ * @return the sample collected
+ */
 SpeechSample takeSample() {
     int windowIndex = 0;
     int count = 0;
@@ -166,7 +189,9 @@ float hzToMel(float hz) {
 float melToHz(float mel) {
     return 700.0f * (powf(10.0f, mel / 2959.0f) - 1.0f);
 }
-
+/**
+ * Compute the weights of the Mel filterbank
+ */
 void computeMelFilterbank() {
     // Initialise all weights to 0
     memset(melWeights, 0, sizeof(melWeights));

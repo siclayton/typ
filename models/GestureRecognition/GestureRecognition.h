@@ -2,8 +2,8 @@
 // Created by simon on 06/03/2026.
 //
 
-#ifndef CODAL_GESTURERECOGNITION_H
-#define CODAL_GESTURERECOGNITION_H
+#ifndef GESTURERECOGNITION_H
+#define GESTURERECOGNITION_H
 
 #define NUM_FEATURES 24
 
@@ -23,4 +23,4 @@ typedef struct {
     GestureSample sample;
 } TrainingSample;
 
-#endif // CODAL_GESTURERECOGNITION_H
+#endif

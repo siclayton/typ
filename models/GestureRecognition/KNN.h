@@ -1,8 +1,5 @@
-//
-// Created by simon on 06/03/2026.
-//
-#ifndef CODAL_KNN_H
-#define CODAL_KNN_H
+#ifndef KNN_H
+#define KNN_H
 
 #include "GestureRecognition.h"
 
@@ -30,4 +27,4 @@ private:
     int majorityClass();
 };
 
-#endif // CODAL_KNN_H
+#endif

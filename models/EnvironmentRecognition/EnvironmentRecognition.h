@@ -18,4 +18,4 @@ typedef struct {
     EnvironmentSample sample;
 } TrainingSample;
 
-#endif // ENVIRONMENTRECOGNITION_H
+#endif

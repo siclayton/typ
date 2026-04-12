@@ -15,15 +15,23 @@ TrainingSample samples[NUM_SAMPLES];
 //Acts as a placeholder until a trained model is created
 LogisticRegressionModel* model = nullptr;
 
+/**
+ * Scale features to prevent dot product from exploding
+ * @param variance a pointer to the variance
+ * @param max a pointer to the max
+ * @param zcr a pointer to the zero-crossing rate
+ */
 void scaleFeatures(float* variance, float* max, float* zcr) {
-    //Scale features to prevent dot product from exploding
     //Very naive scaling based on seen values when training
     *variance = (*variance - 50.0f) / 50.0f;
     *max = (*max - 425.0f) / 50.0f;
     *zcr = (*zcr - 0.16f) / 0.04f;
 }
-
-MicrophoneSample takeSample(int sampleClass) {
+/**
+ * Collect a sample which represents whether there is voice activity or not
+ * @return the collected sample
+ */
+MicrophoneSample takeSample() {
     //Discard the first 1/4 of a second of measurements to ensure samples don't include noise
     uint64_t discardStart = system_timer_current_time();
     while (system_timer_current_time() - discardStart < 250){
@@ -75,8 +83,8 @@ MicrophoneSample takeSample(int sampleClass) {
 
     MicrophoneSample sample = {variance, max, zcr};
 
-    uBit.serial.printf("Sample %d: %d, %d, %d, %d\r\n",
-        currentSample, sampleClass, static_cast<int>(variance * 1000), max, static_cast<int>(zcr * 1000)
+    uBit.serial.printf("Sample %d: %d, %d, %d\r\n",
+        currentSample, static_cast<int>(variance * 1000), max, static_cast<int>(zcr * 1000)
     );
 
     return sample;

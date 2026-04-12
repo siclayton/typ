@@ -1,7 +1,3 @@
-//
-// Created by simon on 06/03/2026.
-//
-
 #ifndef DECISIONTREE_H
 #define DECISIONTREE_H
 

@@ -14,7 +14,10 @@ TrainingSample samples[NUM_SAMPLES];
 //Acts as a placeholder until a trained model is created
 NaiveBayesModel* model = nullptr;
 
-
+/**
+ * Collect a sample that represents the environment that the micro:bit is currently in
+ * @return the sample collected
+ */
 EnvironmentSample takeSample() {
     uBit.display.clear();
     uBit.sleep(50);
