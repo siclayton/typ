@@ -73,7 +73,7 @@ float KNN::squared_euclidean_distance(GestureSample sample1, int index) {
     //Calculate differences in variables
     float dist = 0;
 
-    for (int i = 0; i < FEATURE_COUNT; i++) {
+    for (int i = 0; i < NUM_FEATURES; i++) {
         float featureDiff = sample1.features[i] - sample2.features[i];
         dist += featureDiff * featureDiff;
     }
