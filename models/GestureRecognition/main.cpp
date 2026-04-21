@@ -58,7 +58,7 @@ void printSample(GestureSample &sample) {
             sizeof(buf) - offset,
             "%d%s",
             value,
-            i < FEATURE_COUNT - 1 ? "," : ""
+            i < NUM_FEATURES - 1 ? "," : ""
         );
     }
 
