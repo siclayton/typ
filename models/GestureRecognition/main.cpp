@@ -51,7 +51,7 @@ void printSample(GestureSample &sample) {
     char buf[128];
     int offset = 0;
 
-    for (int i = 0; i < FEATURE_COUNT; i++) {
+    for (int i = 0; i < NUM_FEATURES; i++) {
         int value = static_cast<int>(sample.features[i] * 1000);
         offset += snprintf(
             buf + offset,
