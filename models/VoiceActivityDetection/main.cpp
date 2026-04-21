@@ -91,7 +91,7 @@ MicrophoneSample takeSample() {
 }
 
 void onButtonA(MicroBitEvent e) {
-    MicrophoneSample micSample = takeSample(currentClass);
+    MicrophoneSample micSample = takeSample();
 
     //If in training mode, label sample and add it to list of samples used to train the model
     //Otherwise, predict the class of the sample collected
